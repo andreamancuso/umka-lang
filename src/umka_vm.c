@@ -1476,6 +1476,38 @@ static FORCE_INLINE void doAllocMap(HeapPages *pages, Map *map, const Type *type
 }
 
 
+static FORCE_INLINE bool doHostMapSlotTypeSupported(const Type *type)
+{
+    if (!type)
+        return false;
+
+    if (type->kind == TYPE_STR)
+        return true;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind))
+        return true;
+
+    if (type->kind == TYPE_ARRAY || type->kind == TYPE_STRUCT)
+        return !typeHasPtr(type, true);
+
+    return false;
+}
+
+
+static FORCE_INLINE bool doHostMapTypeSupported(const Type *type)
+{
+    return type && type->kind == TYPE_MAP &&
+           doHostMapSlotTypeSupported(typeMapKey(type)) &&
+           doHostMapSlotTypeSupported(typeMapItem(type));
+}
+
+
+static FORCE_INLINE bool doHostMapStringSlotValid(HeapPages *pages, const Type *type, Slot slot)
+{
+    return type->kind != TYPE_STR || !slot.ptrVal || pageFind(pages, slot.ptrVal);
+}
+
+
 static FORCE_INLINE void doRebalanceMapNodes(MapNode **parent, MapNode *child)
 {
     // Rotate tree to swap parent and child nodes
@@ -4367,6 +4399,67 @@ void *vmGetMapNodeData(VM *vm, Map *map, Slot key)
 
     const MapNode *node = *doGetMapNode(map, key, false, NULL, vm->error);
     return node ? node->data : NULL;
+}
+
+
+bool vmMakeMap(VM *vm, Map *map, const Type *type)
+{
+    if (!vm || !map || !doHostMapTypeSupported(type))
+        return false;
+
+    if (map->root || map->type)
+    {
+        if (!map->root || !map->type || map->type->kind != TYPE_MAP)
+            return false;
+
+        doRefCntImpl(&vm->pages, map, map->type, TOK_MINUSMINUS);
+        map->root = NULL;
+        map->type = NULL;
+    }
+
+    doAllocMap(&vm->pages, map, type, vm->error);
+    return true;
+}
+
+
+bool vmSetMapNodeData(VM *vm, Map *map, Slot key, Slot data)
+{
+    if (!vm || !map || !map->root || !doHostMapTypeSupported(map->type))
+        return false;
+
+    const Type *keyType = typeMapKey(map->type);
+    const Type *itemType = typeMapItem(map->type);
+
+    if (!doHostMapStringSlotValid(&vm->pages, keyType, key) ||
+        !doHostMapStringSlotValid(&vm->pages, itemType, data))
+        return false;
+
+    MapNode *node = *doGetMapNode(map, key, true, &vm->pages, vm->error);
+    if (!node->data)
+    {
+        node->priority = (int64_t)rand() + 1;
+
+        node->key  = chunkAlloc(&vm->pages, keyType->size,  keyType->kind  == TYPE_DYNARRAY ? NULL : keyType,  NULL, false, vm->error);
+        node->data = chunkAlloc(&vm->pages, itemType->size, itemType->kind == TYPE_DYNARRAY ? NULL : itemType, NULL, false, vm->error);
+
+        if (keyType->isGarbageCollected)
+            doRefCntImpl(&vm->pages, key.ptrVal, keyType, TOK_PLUSPLUS);
+
+        doAssignImpl(node->key, key, keyType->kind, keyType->size, vm->error);
+        map->root->len++;
+    }
+
+    if (itemType->isGarbageCollected)
+    {
+        doRefCntImpl(&vm->pages, data.ptrVal, itemType, TOK_PLUSPLUS);
+
+        Slot oldData = {.ptrVal = node->data};
+        doDerefImpl(&oldData, itemType->kind, vm->error);
+        doRefCntImpl(&vm->pages, oldData.ptrVal, itemType, TOK_MINUSMINUS);
+    }
+
+    doAssignImpl(node->data, data, itemType->kind, itemType->size, vm->error);
+    return true;
 }
 
 

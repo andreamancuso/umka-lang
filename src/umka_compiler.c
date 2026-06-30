@@ -54,8 +54,10 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaGetResultType     = umkaGetResultType;
     umka->api.umkaGetFieldType      = umkaGetFieldType;
     umka->api.umkaGetMapKeyType     = umkaGetMapKeyType;
-    umka->api.umkaGetMapItemType    = umkaGetMapItemType; 
-    umka->api.umkaAddClosure        = umkaAddClosure;        
+    umka->api.umkaGetMapItemType    = umkaGetMapItemType;
+    umka->api.umkaAddClosure        = umkaAddClosure;
+    umka->api.umkaMakeMap           = umkaMakeMap;
+    umka->api.umkaSetMapItem        = umkaSetMapItem;
 }
 
 

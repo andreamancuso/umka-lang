@@ -452,7 +452,7 @@ typedef struct
     struct tagMapNode *root;
 } UmkaMap;
 ```
-Umka map. Can be accessed by calling `umkaGetMapItem`.
+Umka map. Can be created by calling `umkaMakeMap`, modified by calling `umkaSetMapItem`, and accessed by calling `umkaGetMapItem`.
 
 ```
 typedef struct
@@ -655,6 +655,48 @@ Parameters:
 * `key`: Key value
 
 Returned value: Pointer to the map item, `NULL` if the item does not exist.
+
+```
+UMKA_API bool umkaMakeMap(Umka *umka, UmkaMap *map, const UmkaType *type);
+```
+Creates an Umka map in caller-provided `UmkaMap` storage. Equivalent to `map = make(type)` in Umka for the supported host API subset.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `map`: Pointer to `UmkaMap` storage. Before the first call, the storage must be zero-initialized. Calling `umkaMakeMap` again for an existing valid map releases the old map contents first
+* `type`: Map type. Can be obtained by calling `umkaGetParamType` or `umkaGetResultType`
+
+Returned value: `true` if the map has been created, otherwise `false`.
+
+Notes:
+
+* The allocated map nodes, keys, and items are owned by the Umka interpreter heap and must not be accessed after `umkaFree` or after the interpreter has terminated with a runtime error
+* This host API slice supports map key and item types that are fixed-layout non-reference values, plus direct `str`. Fixed-layout non-reference values include ordinal and real types, fixed arrays, and structures that contain no pointers, weak pointers, strings, maps, dynamic arrays, interfaces, closures, or fibers
+* Unsupported map shapes include nested maps, dynamic arrays, pointers, weak pointers, interfaces, closures, fibers, `any`, and structures or arrays that contain any of those
+* `false` is returned for `NULL` arguments, non-map `type`, unsupported key/item types, or invalid non-zero `map` storage
+
+```
+UMKA_API bool umkaSetMapItem(Umka *umka, UmkaMap *map, UmkaStackSlot key, UmkaStackSlot item);
+```
+Inserts or replaces a map item.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `map`: Map previously initialized by `umkaMakeMap`
+* `key`: Key value. For fixed-layout structured keys, store a pointer to the source bytes in `ptrVal`
+* `item`: Item value. For fixed-layout structured items, store a pointer to the source bytes in `ptrVal`
+
+Returned value: `true` if the item has been inserted or replaced, otherwise `false`.
+
+Notes:
+
+* Direct `str` keys and items must be `NULL` or Umka strings created by `umkaMakeStr`
+* The map stores its own references to direct `str` keys and items. The caller remains responsible for any reference it keeps, and may call `umkaDecRef` after successful insertion to transfer sole ownership to the map
+* Replacing a direct `str` item decrements the old stored string reference
+* Fixed-layout non-reference keys and items are copied by value
+* `false` is returned for `NULL` arguments, uninitialized maps, unsupported map shapes, or direct string pointers that do not belong to the Umka heap. Allocation failures and other VM runtime errors still use the normal Umka error mechanism
 
 ## Accessing Umka API dynamically
 
