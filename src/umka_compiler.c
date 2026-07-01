@@ -88,6 +88,15 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaCallableValid     = umkaCallableValid;
     umka->api.umkaMakeCallableContext = umkaMakeCallableContext;
     umka->api.umkaCallCallable      = umkaCallCallable;
+    umka->api.umkaTypesEquivalent   = umkaTypesEquivalent;
+    umka->api.umkaGetTypeItemCount  = umkaGetTypeItemCount;
+    umka->api.umkaTypeHasReferences = umkaTypeHasReferences;
+    umka->api.umkaTypeUsesIndirectValueSlot = umkaTypeUsesIndirectValueSlot;
+    umka->api.umkaGetEnumMemberCount = umkaGetEnumMemberCount;
+    umka->api.umkaGetEnumMember     = umkaGetEnumMember;
+    umka->api.umkaGetFuncDefaultParamCount = umkaGetFuncDefaultParamCount;
+    umka->api.umkaGetCallableFuncType = umkaGetCallableFuncType;
+    umka->api.umkaTypeIsVariadicParamList = umkaTypeIsVariadicParamList;
 }
 
 

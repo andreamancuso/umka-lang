@@ -701,6 +701,31 @@ UMKA_API int umkaGetTypeSpelling(const UmkaType *type, char *buf, int size);
 Writes the source-style type spelling to `buf` and returns the full spelling length, not including the terminating null character. If `buf` is `NULL` or `size` is 0, only the length is returned. If the buffer is too small, the written string is truncated and null-terminated.
 
 ```
+UMKA_API bool umkaTypesEquivalent(const UmkaType *left, const UmkaType *right);
+```
+Returns `true` if two type handles are equivalent according to Umka type rules. `NULL` inputs are safe; two `NULL` inputs are treated as equivalent, and one `NULL` input is not equivalent to a non-`NULL` type.
+
+```
+UMKA_API int umkaGetTypeItemCount(const UmkaType *type);
+```
+Returns the internal item count for types that have one. For arrays this is the fixed element count. For structures, interfaces, closures, and enumerations this is the number of fields or enum members. Returns 0 for `NULL` and for types without items.
+
+```
+UMKA_API bool umkaTypeHasReferences(const UmkaType *type);
+```
+Returns whether values of the type contain Umka-managed references that need VM ownership or reference-count handling. Returns `false` for `NULL`.
+
+```
+UMKA_API bool umkaTypeUsesIndirectValueSlot(const UmkaType *type);
+```
+Returns whether values of the type are passed through an indirect value slot whose `ptrVal` points to storage. Arrays, dynamic arrays, maps, structures, interfaces, and closures use indirect value slots. Scalar values, strings, pointers, weak pointers, fibers, and direct `fn` values use direct slots. Returns `false` for `NULL`.
+
+```
+UMKA_API bool umkaTypeIsVariadicParamList(const UmkaType *type);
+```
+Returns whether the type is the dynamic-array type created for a variadic `..T` source parameter. Returns `false` for `NULL`.
+
+```
 UMKA_API const UmkaType *umkaGetBaseType(const UmkaType *type);
 ```
 For a pointer, weak pointer, or fiber type, returns the base type. For an array or dynamic array type, returns the item type.
@@ -714,20 +739,20 @@ Returned value: Base type of a pointer, weak pointer, or fiber type; item type o
 ```
 UMKA_API int umkaGetFieldCount(const UmkaType *type);
 ```
-Returns the number of fields in a structure type, or 0 for non-structure types and `NULL`.
+Returns the number of fields in a structure, interface, or closure type, or 0 for other types and `NULL`.
 
 ```
 UMKA_API bool umkaGetField(const UmkaType *type, int index, const char **name, const UmkaType **fieldType, int *offset);
 ```
-Returns structure field metadata by index.
+Returns field metadata by index for structure, interface, and closure types.
 
 Parameters:
 
-* `type`: Structure type
+* `type`: Structure, interface, or closure type
 * `index`: Zero-based field index
 * `name`: Optional output pointer for the field name
 * `fieldType`: Optional output pointer for the field type
-* `offset`: Optional output pointer for the byte offset within the structure
+* `offset`: Optional output pointer for the byte offset within the value storage
 
 Returned value: `true` if the field exists, otherwise `false`.
 
@@ -770,6 +795,8 @@ UMKA_API int umkaGetFuncParamCount(const UmkaType *type);
 UMKA_API const char *umkaGetFuncParamName(const UmkaType *type, int index);
 UMKA_API const UmkaType *umkaGetFuncParamType(const UmkaType *type, int index);
 UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type);
+UMKA_API int umkaGetFuncDefaultParamCount(const UmkaType *type);
+UMKA_API const UmkaType *umkaGetCallableFuncType(const UmkaType *type);
 ```
 Returns source-level function signature metadata for `fn` and closure types. Hidden VM parameters are not exposed.
 
@@ -784,6 +811,27 @@ Returned values:
 * `umkaGetFuncParamName`: Parameter name, or `NULL` if unavailable
 * `umkaGetFuncParamType`: Parameter type, or `NULL` if unavailable
 * `umkaGetFuncResultType`: Result type, or `NULL` for non-function types
+* `umkaGetFuncDefaultParamCount`: Number of source parameters with defaults, or 0 for non-function types
+* `umkaGetCallableFuncType`: Underlying direct `fn` type for a direct function or closure type, or `NULL` for non-callable types
+
+```
+UMKA_API int umkaGetEnumMemberCount(const UmkaType *type);
+UMKA_API bool umkaGetEnumMember(const UmkaType *type, int index, const char **name, int64_t *signedValue, uint64_t *unsignedValue);
+```
+Returns enumeration member metadata.
+
+Parameters:
+
+* `type`: Enumeration type
+* `index`: Zero-based member index
+* `name`: Optional output pointer for the member name
+* `signedValue`: Optional output pointer for the member value viewed as signed
+* `unsignedValue`: Optional output pointer for the member value viewed as unsigned
+
+Returned values:
+
+* `umkaGetEnumMemberCount`: Number of enum members, or 0 for non-enum types and `NULL`
+* `umkaGetEnumMember`: `true` if the member exists, otherwise `false`; output pointers are cleared for missing members
 
 ```
 UMKA_API bool umkaGetAnySelf(const UmkaAny *value, const UmkaType **selfType, void **self);

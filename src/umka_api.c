@@ -463,6 +463,12 @@ static bool apiGetInterfaceMethodOffsets(Umka *umka, const Type *interfaceType, 
 }
 
 
+static bool apiTypeHasFields(const Type *type)
+{
+    return type && (type->kind == TYPE_STRUCT || type->kind == TYPE_INTERFACE || type->kind == TYPE_CLOSURE);
+}
+
+
 UMKA_API bool umkaMakeAny(Umka *umka, UmkaAny *dest, const UmkaType *type, UmkaStackSlot value)
 {
     if (!umka || !dest)
@@ -511,22 +517,52 @@ UMKA_API bool umkaMakeInterface(Umka *umka, void *dest, const UmkaType *interfac
 }
 
 
-static const Signature *apiGetFuncSignature(const UmkaType *type)
+static const Type *apiGetCallableFuncType(const Type *type)
 {
     if (!type)
         return NULL;
+
+    if (type->kind == TYPE_FN)
+        return type;
 
     if (type->kind == TYPE_CLOSURE)
     {
         if (type->numItems <= 0 || !type->field[0] || !type->field[0]->type)
             return NULL;
-        type = type->field[0]->type;
+
+        const Type *fnType = type->field[0]->type;
+        return fnType->kind == TYPE_FN ? fnType : NULL;
     }
 
-    if (type->kind != TYPE_FN)
-        return NULL;
+    return NULL;
+}
 
-    return type->sig;
+
+static const Signature *apiGetFuncSignature(const UmkaType *type)
+{
+    const Type *fnType = apiGetCallableFuncType(type);
+    return fnType ? fnType->sig : NULL;
+}
+
+
+static bool apiTypeUsesIndirectValueSlot(const Type *type)
+{
+    if (!type)
+        return false;
+
+    switch (type->kind)
+    {
+        case TYPE_ARRAY:
+        case TYPE_DYNARRAY:
+        case TYPE_MAP:
+        case TYPE_STRUCT:
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+            return true;
+
+        default:
+            return false;
+    }
 }
 
 
@@ -685,13 +721,13 @@ UMKA_API int umkaGetTypeSpelling(const UmkaType *type, char *buf, int size)
 
 UMKA_API int umkaGetFieldCount(const UmkaType *type)
 {
-    return type && type->kind == TYPE_STRUCT ? type->numItems : 0;
+    return apiTypeHasFields(type) ? type->numItems : 0;
 }
 
 
 UMKA_API bool umkaGetField(const UmkaType *type, int index, const char **name, const UmkaType **fieldType, int *offset)
 {
-    if (!type || type->kind != TYPE_STRUCT || index < 0 || index >= type->numItems)
+    if (!apiTypeHasFields(type) || index < 0 || index >= type->numItems)
         return false;
 
     const Field *field = type->field[index];
@@ -741,6 +777,89 @@ UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type)
 {
     const Signature *sig = apiGetFuncSignature(type);
     return sig ? sig->resultType : NULL;
+}
+
+
+UMKA_API bool umkaTypesEquivalent(const UmkaType *left, const UmkaType *right)
+{
+    if (!left || !right)
+        return left == right;
+
+    return typeEquivalent(left, right);
+}
+
+
+UMKA_API int umkaGetTypeItemCount(const UmkaType *type)
+{
+    return type ? type->numItems : 0;
+}
+
+
+UMKA_API bool umkaTypeHasReferences(const UmkaType *type)
+{
+    return type && type->isGarbageCollected;
+}
+
+
+UMKA_API bool umkaTypeUsesIndirectValueSlot(const UmkaType *type)
+{
+    return apiTypeUsesIndirectValueSlot(type);
+}
+
+
+UMKA_API int umkaGetEnumMemberCount(const UmkaType *type)
+{
+    return type && typeEnum(type) ? type->numItems : 0;
+}
+
+
+UMKA_API bool umkaGetEnumMember(const UmkaType *type, int index, const char **name, int64_t *signedValue, uint64_t *unsignedValue)
+{
+    if (name)
+        *name = NULL;
+    if (signedValue)
+        *signedValue = 0;
+    if (unsignedValue)
+        *unsignedValue = 0;
+
+    if (!type || !typeEnum(type) || index < 0 || index >= type->numItems)
+        return false;
+
+    const EnumConst *member = type->enumConst[index];
+    if (!member)
+        return false;
+
+    if (name)
+        *name = member->name;
+    if (signedValue)
+        *signedValue = member->val.intVal;
+    if (unsignedValue)
+        *unsignedValue = member->val.uintVal;
+
+    return true;
+}
+
+
+UMKA_API int umkaGetFuncDefaultParamCount(const UmkaType *type)
+{
+    const Signature *sig = apiGetFuncSignature(type);
+    if (!sig)
+        return 0;
+
+    const int paramCount = apiGetFuncParamCount(sig);
+    return sig->numDefaultParams < paramCount ? sig->numDefaultParams : paramCount;
+}
+
+
+UMKA_API const UmkaType *umkaGetCallableFuncType(const UmkaType *type)
+{
+    return apiGetCallableFuncType(type);
+}
+
+
+UMKA_API bool umkaTypeIsVariadicParamList(const UmkaType *type)
+{
+    return type && type->isVariadicParamList;
 }
 
 
