@@ -921,6 +921,106 @@ Notes:
 * `false` is returned for `NULL` arguments, uninitialized maps, unsupported map shapes, or direct string pointers that do not belong to the Umka heap. Allocation failures and other VM runtime errors still use the normal Umka error mechanism
 
 ```
+UMKA_API bool umkaAssignHostValue(Umka *umka, void *dest, const UmkaType *type, UmkaStackSlot value);
+```
+Assigns a typed value to caller-provided storage using Umka reference-counting rules.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `dest`: Destination storage for a value of `type`. The storage must be zero-initialized or already contain a valid value of the same type
+* `type`: Destination value type
+* `value`: Source value. For `str`, store the string pointer in `ptrVal`. For dynamic arrays, maps, fixed arrays, structures, `any`, and interfaces, store a pointer to source value storage in `ptrVal`
+
+Returned value: `true` if the value has been assigned, otherwise `false`.
+
+Notes:
+
+* The assignment increments references held by the new value, decrements references held by the old destination value, then copies the new value bytes
+* Supported types are ordinal and real values, `bool`, `char`, direct `str`, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
+* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items
+* Dynamic values whose concrete self is a pointer, weak pointer, interface, closure, fiber, or function value are rejected
+* Direct `str` values must be `NULL` or Umka strings created by `umkaMakeStr`
+* If `dest` is a parameter slot in an `UmkaFuncContext`, a successful `umkaCall` consumes that assigned parameter reference through normal function cleanup. Do not call `umkaReleaseHostValue` on that same parameter slot after the call returns. For host-owned storage that is not consumed by an Umka call, release it explicitly
+
+```
+UMKA_API bool umkaReleaseHostValue(Umka *umka, void *dest, const UmkaType *type);
+```
+Releases references held by a value in caller-provided storage and zeroes the storage.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `dest`: Storage containing a valid value of `type`
+* `type`: Value type
+
+Returned value: `true` if the value has been released and zeroed, otherwise `false`.
+
+Notes:
+
+* Use this for host-owned storage initialized by `umkaAssignHostValue`, `umkaMakeAny`, `umkaMakeInterface`, `umkaMakeDynArray`, or `umkaMakeMap`, when that storage is not consumed by `umkaCall`
+* A value may be released after a runtime error as long as the owning `Umka` instance has not been freed
+
+```
+UMKA_API bool umkaMakeAny(Umka *umka, UmkaAny *dest, const UmkaType *type, UmkaStackSlot value);
+```
+Constructs an `any` value in caller-provided `UmkaAny` storage.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `dest`: Destination `UmkaAny` storage. The storage must be zero-initialized or already contain a valid `any` value
+* `type`: Concrete value type, or `NULL` to construct a null `any`
+* `value`: Concrete source value. For structured values, store a pointer to source value storage in `ptrVal`
+
+Returned value: `true` if the `any` value has been constructed, otherwise `false`.
+
+Notes:
+
+* Non-null concrete values are copied to VM heap storage, and the constructed `any` stores a self pointer to that heap copy
+* The constructed `any` owns that self reference until it is overwritten, consumed by an Umka call, or released with `umkaReleaseHostValue`
+* For `str`, dynamic array, and map sources, the constructor retains the source backing storage. The caller still owns any original source reference and may release it after successful construction if it no longer needs it
+* Supported and rejected concrete shapes are the same as for `umkaAssignHostValue`
+
+Example:
+
+```
+UmkaAny value = {0};
+UmkaStackSlot slot = {0};
+slot.intVal = 42;
+
+umkaMakeAny(umka, &value, intType, slot);
+
+slot.ptrVal = &value;
+umkaAssignHostValue(umka, umkaGetParam(fn.params, 0), anyType, slot);
+umkaCall(umka, &fn);
+
+umkaReleaseHostValue(umka, &value, anyType);
+```
+
+```
+UMKA_API bool umkaMakeInterface(Umka *umka, void *dest, const UmkaType *interfaceType, const UmkaType *type, UmkaStackSlot value);
+```
+Constructs an interface value in caller-provided storage.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `dest`: Destination interface storage. Allocate at least `umkaGetTypeSize(interfaceType)` bytes
+* `interfaceType`: Destination interface type
+* `type`: Concrete value type, or `NULL` to construct a null interface value
+* `value`: Concrete source value. For structured values, store a pointer to source value storage in `ptrVal`
+
+Returned value: `true` if the interface value has been constructed, otherwise `false`.
+
+Notes:
+
+* The constructor copies the concrete value to VM heap storage, stores a `^T` self type, and fills the interface method table by resolving methods for `^T`
+* This supports Umka's value-to-interface model for declared concrete types with pointer receiver methods
+* `false` is returned if `interfaceType` is not an interface, the concrete type does not implement every required method with a compatible signature, or the concrete shape is unsupported
+* Direct host pointer ownership is not implemented by this API. Pass a concrete value of type `T`; the constructor creates the `^T` self storage used by the interface
+
+```
 UMKA_API void umkaMakeHostHandle(UmkaHostHandle *handle);
 ```
 Initializes a host handle. Call this before any retain, clear, release, or read operation unless the handle storage has been zero-initialized.

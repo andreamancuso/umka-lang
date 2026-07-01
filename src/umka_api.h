@@ -234,6 +234,10 @@ typedef const UmkaType *(*UmkaGetFuncResultType)(const UmkaType *type);
 typedef bool (*UmkaGetAnySelf)                  (const UmkaAny *value, const UmkaType **selfType, void **self);
 typedef bool (*UmkaGetAnyValue)                 (const UmkaAny *value, const UmkaType **type, UmkaStackSlot *slot);
 typedef bool (*UmkaAddClosure)                  (Umka *umka, const char *name, UmkaExternFunc func, void *upvalue);
+typedef bool (*UmkaAssignHostValue)             (Umka *umka, void *dest, const UmkaType *type, UmkaStackSlot value);
+typedef bool (*UmkaReleaseHostValue)            (Umka *umka, void *dest, const UmkaType *type);
+typedef bool (*UmkaMakeAny)                     (Umka *umka, UmkaAny *dest, const UmkaType *type, UmkaStackSlot value);
+typedef bool (*UmkaMakeInterface)               (Umka *umka, void *dest, const UmkaType *interfaceType, const UmkaType *type, UmkaStackSlot value);
 typedef void (*UmkaMakeHostHandle)              (UmkaHostHandle *handle);
 typedef bool (*UmkaRetainHostValue)             (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
 typedef bool (*UmkaRetainHostData)              (Umka *umka, UmkaHostHandle *handle, void *ptr);
@@ -309,6 +313,10 @@ typedef struct
     UmkaGetFuncResultType umkaGetFuncResultType;
     UmkaGetAnySelf     umkaGetAnySelf;
     UmkaGetAnyValue    umkaGetAnyValue;
+    UmkaAssignHostValue umkaAssignHostValue;
+    UmkaReleaseHostValue umkaReleaseHostValue;
+    UmkaMakeAny        umkaMakeAny;
+    UmkaMakeInterface  umkaMakeInterface;
 } UmkaAPI;
 
 
@@ -367,6 +375,10 @@ UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type);
 UMKA_API bool umkaGetAnySelf                (const UmkaAny *value, const UmkaType **selfType, void **self);
 UMKA_API bool umkaGetAnyValue               (const UmkaAny *value, const UmkaType **type, UmkaStackSlot *slot);
 UMKA_API bool umkaAddClosure                (Umka *umka, const char *name, UmkaExternFunc func, void *upvalue);
+UMKA_API bool umkaAssignHostValue           (Umka *umka, void *dest, const UmkaType *type, UmkaStackSlot value);
+UMKA_API bool umkaReleaseHostValue          (Umka *umka, void *dest, const UmkaType *type);
+UMKA_API bool umkaMakeAny                   (Umka *umka, UmkaAny *dest, const UmkaType *type, UmkaStackSlot value);
+UMKA_API bool umkaMakeInterface             (Umka *umka, void *dest, const UmkaType *interfaceType, const UmkaType *type, UmkaStackSlot value);
 UMKA_API void umkaMakeHostHandle            (UmkaHostHandle *handle);
 UMKA_API bool umkaRetainHostValue           (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
 UMKA_API bool umkaRetainHostData            (Umka *umka, UmkaHostHandle *handle, void *ptr);

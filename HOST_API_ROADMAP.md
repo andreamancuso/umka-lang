@@ -36,7 +36,9 @@ Fourth fork slice status: `UmkaTypeKind`, `umkaGetTypeKind`, `umkaGetTypeName`, 
 
 Unsupported or deliberately deferred dynamic payloads are pointers, weak pointers, nested interfaces, closures, fibers, and function values. `umkaGetAnyValue` can inspect these where the VM can deconstruct them, but `umkaRetainHostValue` rejects them because this fork does not yet define safe ownership, call/resume, reentrancy, or cross-frame lifetime rules for those shapes.
 
-Host construction of `any` and interface values remains out of scope. A safe constructor should reuse VM assignment, reference-counting, type assertion, and interface method-table setup semantics rather than requiring hosts to synthesize private interface cells.
+Fifth fork slice status: `umkaAssignHostValue`, `umkaReleaseHostValue`, `umkaMakeAny`, and `umkaMakeInterface` provide additive host-side assignment and construction for supported values. `umkaAssignHostValue` gives caller-provided storage a reference-counted value and `umkaReleaseHostValue` releases host-owned storage. `umkaMakeAny` copies supported concrete values to VM heap storage and initializes `any` without exposing private interface layout. `umkaMakeInterface` does the same for non-empty interfaces and fills method-table entries by resolving compatible pointer receiver methods for the concrete type.
+
+Current construction limits: direct host pointer ownership, weak pointers, closures, fibers, function values, nested interface payloads, and containers with unsupported fields/items remain rejected. Map creation still has the narrower `umkaMakeMap`/`umkaSetMapItem` construction limits for creating map contents, although existing supported map values can be assigned or boxed. Function parameter slots assigned by the host are consumed by normal Umka call cleanup after a successful `umkaCall`; host-owned storage that is not consumed by a call must be released explicitly.
 
 ## 5. UmkaSharp Integration
 

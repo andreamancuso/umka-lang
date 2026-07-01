@@ -81,6 +81,10 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaGetFuncResultType = umkaGetFuncResultType;
     umka->api.umkaGetAnySelf        = umkaGetAnySelf;
     umka->api.umkaGetAnyValue       = umkaGetAnyValue;
+    umka->api.umkaAssignHostValue   = umkaAssignHostValue;
+    umka->api.umkaReleaseHostValue  = umkaReleaseHostValue;
+    umka->api.umkaMakeAny           = umkaMakeAny;
+    umka->api.umkaMakeInterface     = umkaMakeInterface;
 }
 
 

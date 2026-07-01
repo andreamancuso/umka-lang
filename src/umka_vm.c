@@ -1480,6 +1480,64 @@ static bool doHostHandleInterfaceValueSupported(const Interface *interface)
 }
 
 
+static bool doHostAssignableTypeSupported(const Type *type)
+{
+    if (!type)
+        return false;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR)
+        return true;
+
+    switch (type->kind)
+    {
+        case TYPE_DYNARRAY:
+        case TYPE_MAP:
+        case TYPE_ARRAY:
+        case TYPE_STRUCT:
+            return doHostHandleContainedTypeSupported(type, 32);
+
+        case TYPE_INTERFACE:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
+static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, Slot value)
+{
+    if (!doHostAssignableTypeSupported(type))
+        return false;
+
+    if (type->kind == TYPE_STR)
+        return !value.ptrVal || pageFind(pages, value.ptrVal);
+
+    if (type->kind == TYPE_INTERFACE)
+        return value.ptrVal && doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal);
+
+    if (typeStructured(type))
+    {
+        if (!value.ptrVal)
+            return false;
+
+        if (type->kind == TYPE_DYNARRAY)
+        {
+            const DynArray *array = (const DynArray *)value.ptrVal;
+            return array->type && typeEquivalent(array->type, type) && array->data;
+        }
+
+        if (type->kind == TYPE_MAP)
+        {
+            const Map *map = (const Map *)value.ptrVal;
+            return map->type && typeEquivalent(map->type, type);
+        }
+    }
+
+    return true;
+}
+
+
 static FORCE_INLINE int64_t doHostHandleValueStorageSize(const Type *type)
 {
     switch (type->kind)
@@ -4705,6 +4763,89 @@ bool vmGetAnyValue(const UmkaAny *value, const Type **type, Slot *slot)
     if (slot)
         *slot = result;
 
+    return true;
+}
+
+
+bool vmAssignHostValue(VM *vm, void *dest, const Type *type, Slot value)
+{
+    if (!vm || !dest || !doHostAssignableValueSupported(&vm->pages, type, value))
+        return false;
+
+    if (type->isGarbageCollected)
+    {
+        doRefCntImpl(&vm->pages, value.ptrVal, type, TOK_PLUSPLUS);
+
+        Slot old = {.ptrVal = dest};
+        doDerefImpl(&old, type->kind, vm->error);
+        doRefCntImpl(&vm->pages, old.ptrVal, type, TOK_MINUSMINUS);
+    }
+
+    doAssignImpl(dest, value, type->kind, type->size, vm->error);
+    return true;
+}
+
+
+bool vmReleaseHostValue(VM *vm, void *dest, const Type *type)
+{
+    if (!vm || !dest || !doHostAssignableTypeSupported(type))
+        return false;
+
+    if (type->isGarbageCollected)
+    {
+        Slot old = {.ptrVal = dest};
+        doDerefImpl(&old, type->kind, vm->error);
+        doRefCntImpl(&vm->pages, old.ptrVal, type, TOK_MINUSMINUS);
+    }
+
+    memset(dest, 0, type->size);
+    return true;
+}
+
+
+bool vmMakeDynamicValue(VM *vm, void *dest, const Type *interfaceType, const Type *selfType, const Type *type, Slot value, const int64_t *methodOffsets)
+{
+    if (!vm || !dest || !interfaceType || interfaceType->kind != TYPE_INTERFACE)
+        return false;
+
+    if (!type)
+        return vmReleaseHostValue(vm, dest, interfaceType);
+
+    if (!selfType || selfType->kind != TYPE_PTR || !typeEquivalent(selfType->base, type) ||
+        !doHostAssignableValueSupported(&vm->pages, type, value))
+        return false;
+
+    if (interfaceType->numItems > 2 && !methodOffsets)
+        return false;
+
+    char *interfaceStorage = calloc(1, interfaceType->size > 0 ? interfaceType->size : 1);
+    if (!interfaceStorage)
+        return false;
+
+    void *self = chunkAlloc(&vm->pages, type->size, type->kind == TYPE_DYNARRAY ? NULL : type, NULL, false, vm->error);
+    if (!vmAssignHostValue(vm, self, type, value))
+    {
+        doRefCntImpl(&vm->pages, self, selfType, TOK_MINUSMINUS);
+        free(interfaceStorage);
+        return false;
+    }
+
+    Interface *interface = (Interface *)interfaceStorage;
+    interface->self = self;
+    interface->selfType = selfType;
+
+    for (int i = 2; i < interfaceType->numItems; i++)
+        *(int64_t *)(interfaceStorage + interfaceType->field[i]->offset) = methodOffsets[i - 2];
+
+    if (!vmReleaseHostValue(vm, dest, interfaceType))
+    {
+        doRefCntImpl(&vm->pages, self, selfType, TOK_MINUSMINUS);
+        free(interfaceStorage);
+        return false;
+    }
+
+    memcpy(dest, interfaceStorage, interfaceType->size);
+    free(interfaceStorage);
     return true;
 }
 

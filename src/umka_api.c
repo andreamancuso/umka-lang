@@ -284,6 +284,19 @@ UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr)
 }
 
 
+UMKA_API bool umkaAssignHostValue(Umka *umka, void *dest, const UmkaType *type, UmkaStackSlot value)
+{
+    const Slot *valuePtr = (Slot *)&value;
+    return umka && vmAssignHostValue(&umka->vm, dest, type, *valuePtr);
+}
+
+
+UMKA_API bool umkaReleaseHostValue(Umka *umka, void *dest, const UmkaType *type)
+{
+    return umka && vmReleaseHostValue(&umka->vm, dest, type);
+}
+
+
 UMKA_API void umkaClearHostHandle(UmkaHostHandle *handle)
 {
     vmClearHostHandle(handle);
@@ -406,6 +419,95 @@ UMKA_API void umkaSetMetadata(Umka *umka, void *metadata)
 UMKA_API void *umkaMakeStruct(Umka *umka, const UmkaType *type)
 {
     return vmMakeStruct(&umka->vm, type);
+}
+
+
+static const Type *apiGetPtrType(Umka *umka, const Type *type)
+{
+    if (!umka || !type)
+        return NULL;
+
+    for (const Type *candidate = umka->types.first; candidate; candidate = candidate->next)
+        if (candidate->kind == TYPE_PTR && typeEquivalent(candidate->base, type))
+            return candidate;
+
+    return typeAddPtrTo(&umka->types, &umka->blocks, type);
+}
+
+
+static bool apiGetInterfaceMethodOffsets(Umka *umka, const Type *interfaceType, const Type *selfType, int64_t *methodOffsets)
+{
+    if (!umka || !interfaceType || interfaceType->kind != TYPE_INTERFACE || !selfType || selfType->kind != TYPE_PTR)
+        return false;
+
+    if (interfaceType->numItems <= 2)
+        return true;
+
+    const Type *receiverType = selfType->base;
+    if (!receiverType || !receiverType->typeIdent || !methodOffsets)
+        return false;
+
+    const int receiverModule = receiverType->typeIdent->module;
+
+    for (int i = 2; i < interfaceType->numItems; i++)
+    {
+        const char *name = interfaceType->field[i]->name;
+        const Ident *method = identFind(&umka->idents, &umka->modules, &umka->blocks, receiverModule, name, selfType, false);
+        if (!method || !typeCompatible(interfaceType->field[i]->type, method->type))
+            return false;
+
+        methodOffsets[i - 2] = method->offset;
+    }
+
+    return true;
+}
+
+
+UMKA_API bool umkaMakeAny(Umka *umka, UmkaAny *dest, const UmkaType *type, UmkaStackSlot value)
+{
+    if (!umka || !dest)
+        return false;
+
+    if (!type)
+        return vmMakeDynamicValue(&umka->vm, dest, umka->types.predecl.anyType, NULL, NULL, (Slot){0}, NULL);
+
+    const Type *selfType = apiGetPtrType(umka, type);
+    const Slot *valuePtr = (Slot *)&value;
+    return selfType && vmMakeDynamicValue(&umka->vm, dest, umka->types.predecl.anyType, selfType, type, *valuePtr, NULL);
+}
+
+
+UMKA_API bool umkaMakeInterface(Umka *umka, void *dest, const UmkaType *interfaceType, const UmkaType *type, UmkaStackSlot value)
+{
+    if (!umka || !dest || !interfaceType || interfaceType->kind != TYPE_INTERFACE)
+        return false;
+
+    if (!type)
+        return vmMakeDynamicValue(&umka->vm, dest, interfaceType, NULL, NULL, (Slot){0}, NULL);
+
+    const Type *selfType = apiGetPtrType(umka, type);
+    if (!selfType)
+        return false;
+
+    const int numMethods = interfaceType->numItems > 2 ? interfaceType->numItems - 2 : 0;
+    int64_t *methodOffsets = NULL;
+    if (numMethods > 0)
+    {
+        methodOffsets = malloc(numMethods * sizeof(int64_t));
+        if (!methodOffsets)
+            return false;
+
+        if (!apiGetInterfaceMethodOffsets(umka, interfaceType, selfType, methodOffsets))
+        {
+            free(methodOffsets);
+            return false;
+        }
+    }
+
+    const Slot *valuePtr = (Slot *)&value;
+    bool ok = vmMakeDynamicValue(&umka->vm, dest, interfaceType, selfType, type, *valuePtr, methodOffsets);
+    free(methodOffsets);
+    return ok;
 }
 
 
