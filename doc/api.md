@@ -321,6 +321,15 @@ typedef struct
 Umka error or warning description. Returned by `umkaGetError`, passed to `UmkaWarningCallback`.
 
 ```
+enum
+{
+    UMKA_ERR_RUNTIME     = -1,
+    UMKA_ERR_INTERRUPTED = -2
+};
+```
+Runtime error codes returned by `umkaRun` and `umkaCall`.
+
+```
 typedef void (*UmkaWarningCallback)(UmkaError *warning);
 ```
 Umka warning callback that can be set by `umkaInit`.
@@ -374,6 +383,61 @@ Parameters:
 * `umka`: Interpreter instance handle
 
 Returned value: `true` if the interpreter instance has not yet terminated.
+
+### Interrupting execution
+
+```
+UMKA_API void umkaRequestInterrupt(Umka *umka, const char *message);
+```
+Requests cooperative interruption of the interpreter. The request is interpreter-wide and is observed by the VM before dispatching a bytecode instruction. If an interrupt is observed, `umkaRun` or `umkaCall` returns `UMKA_ERR_INTERRUPTED`, and `umkaGetError(umka)->msg` contains the supplied message, or `Execution interrupted` if `message` is `NULL` or empty.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `message`: Optional error message copied into the interpreter
+
+Notes:
+
+* Interrupt requests are sticky until `umkaClearInterrupt` is called
+* A request made before `umkaRun` or `umkaCall` is observed by the next execution attempt
+* If multiple requests are made before the VM observes the interrupt, the latest message is used
+* An observed interrupt uses the normal runtime error path, so `umkaAlive` becomes `false`; clearing the interrupt flag does not revive the interpreter
+* A request made after normal or runtime termination can still be queried and cleared while the `Umka` instance exists, but it does not make a terminated interpreter runnable again
+* No Umka API call is valid after `umkaFree`
+* The interrupt check runs before the next bytecode instruction is dispatched. If that instruction would trigger a call or return hook, the interrupt is reported first
+* External C/C++ callbacks and long-running native operations are not preempted; a pending interrupt is observed after control returns to the VM
+* Interruption is interpreter-wide, not per-fiber. It stops the currently executing VM run/call through the runtime error path
+* The only intended cross-thread host operation is requesting interruption; other API operations remain tied to the thread that owns the interpreter
+
+```
+UMKA_API void umkaClearInterrupt(Umka *umka);
+```
+Clears a pending or previously observed interrupt request. This only clears the flag and message; it does not reset other runtime error state or revive a terminated interpreter.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+
+```
+UMKA_API bool umkaInterruptRequested(Umka *umka);
+```
+Returns whether an interrupt request is currently pending or has been observed and not yet cleared.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+
+Returned value: `true` if interruption has been requested and not cleared.
+
+Example:
+
+```
+umkaRequestInterrupt(umka, "script cancelled");
+
+int err = umkaCall(umka, &fn);
+if (err == UMKA_ERR_INTERRUPTED)
+    fprintf(stderr, "%s\n", umkaGetError(umka)->msg);
+```
 
 ```
 UMKA_API bool umkaGetCallStack(Umka *umka, int depth, int nameSize, 

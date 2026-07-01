@@ -22,6 +22,12 @@ Remaining handle work: broader policy and API coverage for pointers, weak pointe
 
 Add a host-callable VM interruption mechanism so embedded hosts can stop CPU-bound scripts cleanly. BTBrowser can cancel host waits cooperatively today, but a script stuck in pure Umka execution needs native interruption support or process isolation.
 
+Third fork slice status: `UMKA_ERR_INTERRUPTED`, `umkaRequestInterrupt`, `umkaClearInterrupt`, and `umkaInterruptRequested` provide additive interpreter-wide cooperative interruption. The VM checks for a pending request before bytecode dispatch, reports a normal runtime error with the host-supplied message, and unwinds through `umkaRun` or `umkaCall`. Requests are sticky until cleared. An observed interrupt kills the interpreter through the existing runtime error path; clearing the interrupt flag does not make that interpreter runnable again.
+
+Current interruption limits: native C/C++ callbacks and other long-running native operations are not preempted while they are executing. Interruption is per interpreter, not per fiber. The only intended cross-thread API use is requesting interruption; general interpreter operations remain thread-affine.
+
+Remaining interruption work: managed UmkaSharp cancellation-token integration, host timeout policy, and any future upstream hardening around atomic flag/message storage if upstream wants a stricter cross-thread memory model.
+
 ## 4. Closure, Interface, `any`, And Fiber Exposure
 
 Expose these only after rooted heap handles and lifetime rules exist. Closures need captured-upvalue ownership and reentrant call behavior. Interfaces and `any` need self-value rooting, type assertions, and method-table retention. Fibers need host-side creation/resume/status ownership rules.

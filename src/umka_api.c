@@ -132,6 +132,26 @@ UMKA_API int umkaCall(Umka *umka, UmkaFuncContext *fn)
 }
 
 
+UMKA_API void umkaRequestInterrupt(Umka *umka, const char *message)
+{
+    if (umka)
+        vmRequestInterrupt(&umka->vm, message);
+}
+
+
+UMKA_API void umkaClearInterrupt(Umka *umka)
+{
+    if (umka)
+        vmClearInterrupt(&umka->vm);
+}
+
+
+UMKA_API bool umkaInterruptRequested(Umka *umka)
+{
+    return umka && vmInterruptRequested(&umka->vm);
+}
+
+
 UMKA_API void umkaFree(Umka *umka)
 {
     compilerFree(umka);

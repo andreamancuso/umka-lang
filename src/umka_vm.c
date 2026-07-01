@@ -31,6 +31,9 @@
 #include "umka_ident.h"
 
 
+#define INTERRUPT_DEFAULT_MSG "Execution interrupted"
+
+
 /*
 Virtual machine stack layout (64-bit slots):
 
@@ -908,6 +911,8 @@ void vmInit(VM *vm, Storage *storage, int stackSize, bool fileSystemEnabled, Err
     vm->fiber->stackSize = stackSize;
 
     memset(&vm->hooks, 0, sizeof(vm->hooks));
+    vm->interruptRequested = 0;
+    vm->interruptMsg[0] = 0;
     vm->terminatedNormally = false;
     vm->error = error;
 
@@ -963,6 +968,13 @@ static FORCE_INLINE void doHook(Fiber *fiber, const UmkaHookFunc *hooks, UmkaHoo
 
     const DebugInfo *debug = &fiber->debugPerInstr[fiber->ip];
     hooks[event](debug->fileName, debug->fnName, debug->line);
+}
+
+
+static FORCE_INLINE void doCheckInterrupt(VM *vm, Error *error)
+{
+    if (UNLIKELY(vm->interruptRequested))
+        error->runtimeHandler(error->context, ERR_INTERRUPTED, "%s", vm->interruptMsg[0] ? vm->interruptMsg : INTERRUPT_DEFAULT_MSG);
 }
 
 
@@ -4183,6 +4195,8 @@ static void vmLoop(VM *vm)
 
     while (1)
     {
+        doCheckInterrupt(vm, error);
+
         if (UNLIKELY(fiber->top - fiber->stack < MEM_MIN_FREE_STACK))
             error->runtimeHandler(error->context, ERR_RUNTIME, "Stack overflow");
 
@@ -4314,11 +4328,19 @@ void vmCall(VM *vm, UmkaFuncContext *fn)
 
 void vmCleanup(VM *vm)
 {
+    const int interruptRequested = vm->interruptRequested;
+    char interruptMsg[DEFAULT_STR_LEN + 1];
+    snprintf(interruptMsg, sizeof(interruptMsg), "%s", vm->interruptMsg);
+    vmClearInterrupt(vm);
+
     // Go to the entry point
     vm->fiber->ip = JUMP_TO_CLEANUP;
 
     // Main loop
     vmLoop(vm);
+
+    snprintf(vm->interruptMsg, sizeof(vm->interruptMsg), "%s", interruptMsg);
+    vm->interruptRequested = interruptRequested;
 }
 
 
@@ -4331,6 +4353,32 @@ bool vmAlive(VM *vm)
 void vmKill(VM *vm)
 {
     vm->mainFiber->alive = false;
+}
+
+
+void vmRequestInterrupt(VM *vm, const char *message)
+{
+    if (!vm)
+        return;
+
+    snprintf(vm->interruptMsg, sizeof(vm->interruptMsg), "%s", message && message[0] ? message : INTERRUPT_DEFAULT_MSG);
+    vm->interruptRequested = 1;
+}
+
+
+void vmClearInterrupt(VM *vm)
+{
+    if (!vm)
+        return;
+
+    vm->interruptRequested = 0;
+    vm->interruptMsg[0] = 0;
+}
+
+
+bool vmInterruptRequested(VM *vm)
+{
+    return vm && vm->interruptRequested;
 }
 
 

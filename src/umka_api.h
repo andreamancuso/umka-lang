@@ -137,6 +137,13 @@ typedef struct
 } UmkaError;
 
 
+enum
+{
+    UMKA_ERR_RUNTIME     = -1,
+    UMKA_ERR_INTERRUPTED = -2
+};
+
+
 typedef void (*UmkaWarningCallback)(UmkaError *warning);
 
 
@@ -145,6 +152,9 @@ typedef bool (*UmkaInit)                        (Umka *umka, const char *fileNam
 typedef bool (*UmkaCompile)                     (Umka *umka);
 typedef int  (*UmkaRun)                         (Umka *umka);
 typedef int  (*UmkaCall)                        (Umka *umka, UmkaFuncContext *fn);
+typedef void (*UmkaRequestInterrupt)            (Umka *umka, const char *message);
+typedef void (*UmkaClearInterrupt)              (Umka *umka);
+typedef bool (*UmkaInterruptRequested)          (Umka *umka);
 typedef void (*UmkaFree)                        (Umka *umka);
 typedef UmkaError *(*UmkaGetError)              (Umka *umka);
 typedef bool (*UmkaAlive)                       (Umka *umka);
@@ -240,6 +250,9 @@ typedef struct
     UmkaHostHandleValid umkaHostHandleValid;
     UmkaGetHostHandleType umkaGetHostHandleType;
     UmkaGetHostHandleValue umkaGetHostHandleValue;
+    UmkaRequestInterrupt umkaRequestInterrupt;
+    UmkaClearInterrupt umkaClearInterrupt;
+    UmkaInterruptRequested umkaInterruptRequested;
 } UmkaAPI;
 
 
@@ -248,6 +261,9 @@ UMKA_API bool umkaInit                      (Umka *umka, const char *fileName, c
 UMKA_API bool umkaCompile                   (Umka *umka);
 UMKA_API int  umkaRun                       (Umka *umka);
 UMKA_API int  umkaCall                      (Umka *umka, UmkaFuncContext *fn);
+UMKA_API void umkaRequestInterrupt          (Umka *umka, const char *message);
+UMKA_API void umkaClearInterrupt            (Umka *umka);
+UMKA_API bool umkaInterruptRequested        (Umka *umka);
 UMKA_API void umkaFree                      (Umka *umka);
 UMKA_API UmkaError *umkaGetError            (Umka *umka);
 UMKA_API bool umkaAlive                     (Umka *umka);

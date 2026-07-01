@@ -44,7 +44,8 @@ enum    // Special values for return addresses
 
 enum    // Runtime error codes
 {
-    ERR_RUNTIME = -1
+    ERR_RUNTIME     = UMKA_ERR_RUNTIME,
+    ERR_INTERRUPTED = UMKA_ERR_INTERRUPTED
 };
 
 
@@ -197,6 +198,8 @@ typedef struct tagVM
     Fiber *fiber, *mainFiber;
     HeapPages pages;
     UmkaHookFunc hooks[UMKA_NUM_HOOKS];
+    volatile int interruptRequested;
+    char interruptMsg[DEFAULT_STR_LEN + 1];
     bool terminatedNormally;
     Storage *storage;
     Error *error;
@@ -213,6 +216,9 @@ void vmCall                     (VM *vm, UmkaFuncContext *fn);
 void vmCleanup                  (VM *vm);
 bool vmAlive                    (VM *vm);
 void vmKill                     (VM *vm);
+void vmRequestInterrupt         (VM *vm, const char *message);
+void vmClearInterrupt           (VM *vm);
+bool vmInterruptRequested       (VM *vm);
 int vmAsm                       (int ip, const Instruction *code, const DebugInfo *debugPerInstr, const Idents *idents, char *buf, int size);
 bool vmUnwindCallStack          (VM *vm, const Slot **base, int *ip);
 void vmSetHook                  (VM *vm, UmkaHookEvent event, UmkaHookFunc hook);
