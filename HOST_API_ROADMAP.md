@@ -8,11 +8,15 @@ Add public C APIs for host-side map allocation, insertion, assignment/reference-
 
 First fork slice status: `umkaMakeMap` and `umkaSetMapItem` provide additive host-side creation and insertion for fixed-layout non-reference key/item maps plus direct `str` key/item maps. This covers the initial UmkaSharp shapes needed for C# map arguments and callback map results, including `map[int]int`, `map[str]int`, and `map[str]str`.
 
-Remaining map work: rooted host handles, long-lived ownership transfer, arbitrary nested maps, dynamic arrays, pointers, interfaces, closures, fibers, `any`, and structures or arrays that contain reference-bearing fields.
+Remaining map work: arbitrary map construction for dynamic arrays, pointers, interfaces, closures, fibers, `any`, nested maps, and structures or arrays that contain unsupported reference-bearing fields.
 
 ## 2. Rooted Heap Value Handles
 
 Add a safe host handle model for Umka heap values. The model should define retain, release, root, ownership, thread-affinity, and runtime-shutdown rules for maps, dynamic arrays, strings, interfaces, `any`, closures, fibers, and other heap-backed values before they are exposed through managed wrappers.
+
+Second fork slice status: `UmkaHostHandle`, `umkaMakeHostHandle`, `umkaRetainHostValue`, `umkaRetainHostData`, `umkaClearHostHandle`, `umkaReleaseHostHandle`, `umkaHostHandleValid`, `umkaGetHostHandleType`, and `umkaGetHostHandleValue` provide additive host-side rooting for direct `str`, dynamic arrays, maps, fixed arrays, fixed structures, and plain heap data chunks. Handles retain existing dynamic array and map backing storage rather than deep-copying contents. Handles must be cleared before `umkaFree`; they may be cleared after a runtime error while the owning interpreter still exists.
+
+Remaining handle work: broader policy and API coverage for pointers, weak pointers, interfaces, `any`, closures, fibers, function values, thread handoff, and managed wrapper integration.
 
 ## 3. Interrupt And Cancellation Support
 

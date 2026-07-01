@@ -3,3 +3,12 @@
 *obj/
 src/umka_runtime_src.h
 box.tar
+
+# Local goal and generated build/test artifacts
+/goal.txt
+/umka_linux/
+/umka_windows_msvc/
+/umka_windows_mingw/
+/umka_darwin/
+/tests/actual.log
+/benchmarks/actual.log

@@ -109,6 +109,25 @@ typedef struct
 } UmkaClosure;
 
 
+typedef enum
+{
+    UMKA_HOST_HANDLE_EMPTY,
+    UMKA_HOST_HANDLE_VALUE,
+    UMKA_HOST_HANDLE_DATA
+} UmkaHostHandleKind;
+
+
+typedef struct
+{
+    void *runtime;
+    const UmkaType *type;
+    UmkaStackSlot value;
+    void *storage;
+    int64_t storageSize;
+    UmkaHostHandleKind kind;
+} UmkaHostHandle;
+
+
 typedef struct
 {
     const char *fileName;
@@ -161,6 +180,14 @@ typedef const UmkaType *(*UmkaGetFieldType)     (const UmkaType *structType, con
 typedef const UmkaType *(*UmkaGetMapKeyType)    (const UmkaType *mapType);
 typedef const UmkaType *(*UmkaGetMapItemType)   (const UmkaType *mapType);
 typedef bool (*UmkaAddClosure)                  (Umka *umka, const char *name, UmkaExternFunc func, void *upvalue);
+typedef void (*UmkaMakeHostHandle)              (UmkaHostHandle *handle);
+typedef bool (*UmkaRetainHostValue)             (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
+typedef bool (*UmkaRetainHostData)              (Umka *umka, UmkaHostHandle *handle, void *ptr);
+typedef void (*UmkaClearHostHandle)             (UmkaHostHandle *handle);
+typedef void (*UmkaReleaseHostHandle)           (UmkaHostHandle *handle);
+typedef bool (*UmkaHostHandleValid)             (const UmkaHostHandle *handle);
+typedef const UmkaType *(*UmkaGetHostHandleType)(const UmkaHostHandle *handle);
+typedef UmkaStackSlot (*UmkaGetHostHandleValue) (const UmkaHostHandle *handle);
 
 
 typedef struct
@@ -205,6 +232,14 @@ typedef struct
     UmkaAddClosure      umkaAddClosure;
     UmkaMakeMap         umkaMakeMap;
     UmkaSetMapItem      umkaSetMapItem;
+    UmkaMakeHostHandle  umkaMakeHostHandle;
+    UmkaRetainHostValue umkaRetainHostValue;
+    UmkaRetainHostData  umkaRetainHostData;
+    UmkaClearHostHandle umkaClearHostHandle;
+    UmkaReleaseHostHandle umkaReleaseHostHandle;
+    UmkaHostHandleValid umkaHostHandleValid;
+    UmkaGetHostHandleType umkaGetHostHandleType;
+    UmkaGetHostHandleValue umkaGetHostHandleValue;
 } UmkaAPI;
 
 
@@ -248,6 +283,14 @@ UMKA_API const UmkaType *umkaGetFieldType   (const UmkaType *structType, const c
 UMKA_API const UmkaType *umkaGetMapKeyType  (const UmkaType *mapType);
 UMKA_API const UmkaType *umkaGetMapItemType (const UmkaType *mapType);
 UMKA_API bool umkaAddClosure                (Umka *umka, const char *name, UmkaExternFunc func, void *upvalue);
+UMKA_API void umkaMakeHostHandle            (UmkaHostHandle *handle);
+UMKA_API bool umkaRetainHostValue           (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
+UMKA_API bool umkaRetainHostData            (Umka *umka, UmkaHostHandle *handle, void *ptr);
+UMKA_API void umkaClearHostHandle           (UmkaHostHandle *handle);
+UMKA_API void umkaReleaseHostHandle         (UmkaHostHandle *handle);
+UMKA_API bool umkaHostHandleValid           (const UmkaHostHandle *handle);
+UMKA_API const UmkaType *umkaGetHostHandleType(const UmkaHostHandle *handle);
+UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle);
 
 
 static inline UmkaAPI *umkaGetAPI(Umka *umka)

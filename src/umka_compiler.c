@@ -58,6 +58,14 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaAddClosure        = umkaAddClosure;
     umka->api.umkaMakeMap           = umkaMakeMap;
     umka->api.umkaSetMapItem        = umkaSetMapItem;
+    umka->api.umkaMakeHostHandle    = umkaMakeHostHandle;
+    umka->api.umkaRetainHostValue   = umkaRetainHostValue;
+    umka->api.umkaRetainHostData    = umkaRetainHostData;
+    umka->api.umkaClearHostHandle   = umkaClearHostHandle;
+    umka->api.umkaReleaseHostHandle = umkaReleaseHostHandle;
+    umka->api.umkaHostHandleValid   = umkaHostHandleValid;
+    umka->api.umkaGetHostHandleType = umkaGetHostHandleType;
+    umka->api.umkaGetHostHandleValue = umkaGetHostHandleValue;
 }
 
 

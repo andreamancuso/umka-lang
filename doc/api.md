@@ -481,6 +481,26 @@ typedef struct
 ```
 Umka closure.
 
+```
+typedef enum
+{
+    UMKA_HOST_HANDLE_EMPTY,
+    UMKA_HOST_HANDLE_VALUE,
+    UMKA_HOST_HANDLE_DATA
+} UmkaHostHandleKind;
+
+typedef struct
+{
+    void *runtime;
+    const UmkaType *type;
+    UmkaStackSlot value;
+    void *storage;
+    int64_t storageSize;
+    UmkaHostHandleKind kind;
+} UmkaHostHandle;
+```
+Host-owned handle for retaining an Umka heap value across native calls. Initialize it by calling `umkaMakeHostHandle`, retain a value or heap data pointer with `umkaRetainHostValue` or `umkaRetainHostData`, and release it with `umkaClearHostHandle` or `umkaReleaseHostHandle`.
+
 ### Functions
 
 ```
@@ -697,6 +717,87 @@ Notes:
 * Replacing a direct `str` item decrements the old stored string reference
 * Fixed-layout non-reference keys and items are copied by value
 * `false` is returned for `NULL` arguments, uninitialized maps, unsupported map shapes, or direct string pointers that do not belong to the Umka heap. Allocation failures and other VM runtime errors still use the normal Umka error mechanism
+
+```
+UMKA_API void umkaMakeHostHandle(UmkaHostHandle *handle);
+```
+Initializes a host handle. Call this before any retain, clear, release, or read operation unless the handle storage has been zero-initialized.
+
+Parameters:
+
+* `handle`: Host handle storage
+
+```
+UMKA_API bool umkaRetainHostValue(Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
+```
+Retains a typed Umka value in a host handle. If the handle already contains a value, the old value is released after the new value has been retained.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `handle`: Initialized host handle
+* `type`: Value type. Use `umkaGetParamType`, `umkaGetResultType`, `umkaGetFieldType`, `umkaGetMapKeyType`, or `umkaGetMapItemType`
+* `value`: Value to retain. For `str`, store the string pointer in `ptrVal`. For structured values such as dynamic arrays, maps, arrays, and structures, store a pointer to the value storage in `ptrVal`
+
+Returned value: `true` if the value has been retained, otherwise `false`.
+
+Notes:
+
+* Supported root value types are direct `str`, dynamic arrays, maps, fixed arrays, and structures
+* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected in this slice
+* For dynamic arrays and maps, the handle retains the existing backing heap storage; it does not deep-copy the array items or map nodes
+* For fixed arrays and structures, the handle stores a C-side byte copy and adjusts recursive reference counts for supported reference-bearing fields
+* `NULL` is a valid retained `str` value. Structured values require a non-`NULL` `ptrVal`
+
+```
+UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr);
+```
+Retains a heap chunk pointer, usually returned by `umkaAllocData` or `umkaMakeStruct`.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `handle`: Initialized host handle
+* `ptr`: Pointer to the start of a non-stack Umka heap chunk
+
+Returned value: `true` if the heap chunk has been retained, otherwise `false`.
+
+Notes:
+
+* `umkaRetainHostData` rejects `NULL`, non-Umka pointers, stack chunks, and interior pointers
+* Do not use `umkaRetainHostData` for `str`, dynamic array values, map values, or stack/local structured values. Use `umkaRetainHostValue` with the correct type metadata instead
+
+```
+UMKA_API void umkaClearHostHandle(UmkaHostHandle *handle);
+UMKA_API void umkaReleaseHostHandle(UmkaHostHandle *handle);
+```
+Releases the value retained by a host handle and resets the handle to empty. `umkaReleaseHostHandle` is an alias for `umkaClearHostHandle`.
+
+Parameters:
+
+* `handle`: Host handle
+
+Notes:
+
+* Clearing or releasing an empty initialized handle is a no-op
+* A retained handle may be cleared after a runtime error as long as the owning `Umka` instance has not been freed
+* No operation on a host handle is valid after the owning interpreter has been freed with `umkaFree`; clear all active handles before calling `umkaFree`
+* Host handles are not thread-safe and must be used on the same thread as the owning interpreter
+
+```
+UMKA_API bool umkaHostHandleValid(const UmkaHostHandle *handle);
+```
+Returns `true` if the handle currently retains a value or heap chunk.
+
+```
+UMKA_API const UmkaType *umkaGetHostHandleType(const UmkaHostHandle *handle);
+```
+Returns the retained value type, or `NULL` for empty handles and handles created by `umkaRetainHostData`.
+
+```
+UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle);
+```
+Returns the retained value. For structured values, `ptrVal` points to stable handle-owned value storage until the handle is cleared. For empty handles, the returned slot is zeroed.
 
 ## Accessing Umka API dynamically
 

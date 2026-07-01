@@ -245,6 +245,55 @@ UMKA_API bool umkaSetMapItem(Umka *umka, UmkaMap *map, UmkaStackSlot key, UmkaSt
 }
 
 
+UMKA_API void umkaMakeHostHandle(UmkaHostHandle *handle)
+{
+    vmMakeHostHandle(handle);
+}
+
+
+UMKA_API bool umkaRetainHostValue(Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value)
+{
+    const Slot *valuePtr = (Slot *)&value;
+    return vmRetainHostValue(&umka->vm, handle, type, *valuePtr);
+}
+
+
+UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr)
+{
+    return vmRetainHostData(&umka->vm, handle, ptr);
+}
+
+
+UMKA_API void umkaClearHostHandle(UmkaHostHandle *handle)
+{
+    vmClearHostHandle(handle);
+}
+
+
+UMKA_API void umkaReleaseHostHandle(UmkaHostHandle *handle)
+{
+    vmClearHostHandle(handle);
+}
+
+
+UMKA_API bool umkaHostHandleValid(const UmkaHostHandle *handle)
+{
+    return vmHostHandleValid(handle);
+}
+
+
+UMKA_API const UmkaType *umkaGetHostHandleType(const UmkaHostHandle *handle)
+{
+    return vmGetHostHandleType(handle);
+}
+
+
+UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle)
+{
+    return vmGetHostHandleValue(handle).apiSlot;
+}
+
+
 UMKA_API char *umkaMakeStr(Umka *umka, const char *str)
 {
     return vmMakeStr(&umka->vm, str);

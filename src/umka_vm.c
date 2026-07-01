@@ -1403,6 +1403,77 @@ static void doRefCntImpl(HeapPages *pages, void *ptr, const Type *type, TokenKin
 }
 
 
+static bool doHostHandleContainedTypeSupported(const Type *type, int depth)
+{
+    if (!type || depth <= 0)
+        return false;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR)
+        return true;
+
+    switch (type->kind)
+    {
+        case TYPE_DYNARRAY:
+        case TYPE_ARRAY:
+            return doHostHandleContainedTypeSupported(type->base, depth - 1);
+
+        case TYPE_MAP:
+            return doHostHandleContainedTypeSupported(typeMapKey(type), depth - 1) &&
+                   doHostHandleContainedTypeSupported(typeMapItem(type), depth - 1);
+
+        case TYPE_STRUCT:
+            for (int i = 0; i < type->numItems; i++)
+                if (!doHostHandleContainedTypeSupported(type->field[i]->type, depth - 1))
+                    return false;
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
+static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
+{
+    if (!type)
+        return false;
+
+    switch (type->kind)
+    {
+        case TYPE_STR:
+        case TYPE_DYNARRAY:
+        case TYPE_MAP:
+        case TYPE_ARRAY:
+        case TYPE_STRUCT:
+            return doHostHandleContainedTypeSupported(type, 32);
+
+        default:
+            return false;
+    }
+}
+
+
+static FORCE_INLINE int64_t doHostHandleValueStorageSize(const Type *type)
+{
+    switch (type->kind)
+    {
+        case TYPE_DYNARRAY: return sizeof(DynArray);
+        case TYPE_MAP:      return sizeof(Map);
+        case TYPE_ARRAY:
+        case TYPE_STRUCT:   return type->size;
+        default:            return 0;
+    }
+}
+
+
+static FORCE_INLINE const Type *doHostHandlePtrVoidType(void)
+{
+    static const Type voidType = {.kind = TYPE_VOID};
+    static const Type ptrVoidType = {.kind = TYPE_PTR, .base = &voidType};
+    return &ptrVoidType;
+}
+
+
 static FORCE_INLINE char *doAllocStr(HeapPages *pages, int64_t len, Error *error)
 {
     StrDimensions dims = {.len = len, .capacity = 2 * (len + 1)};
@@ -4459,6 +4530,132 @@ bool vmSetMapNodeData(VM *vm, Map *map, Slot key, Slot data)
     }
 
     doAssignImpl(node->data, data, itemType->kind, itemType->size, vm->error);
+    return true;
+}
+
+
+void vmMakeHostHandle(UmkaHostHandle *handle)
+{
+    if (handle)
+        memset(handle, 0, sizeof(*handle));
+}
+
+
+bool vmHostHandleValid(const UmkaHostHandle *handle)
+{
+    return handle && handle->kind != UMKA_HOST_HANDLE_EMPTY && handle->runtime;
+}
+
+
+const Type *vmGetHostHandleType(const UmkaHostHandle *handle)
+{
+    return vmHostHandleValid(handle) ? handle->type : NULL;
+}
+
+
+Slot vmGetHostHandleValue(const UmkaHostHandle *handle)
+{
+    Slot result = {0};
+    if (vmHostHandleValid(handle))
+        result.apiSlot = handle->value;
+    return result;
+}
+
+
+void vmClearHostHandle(UmkaHostHandle *handle)
+{
+    if (!handle)
+        return;
+
+    if (!vmHostHandleValid(handle))
+    {
+        memset(handle, 0, sizeof(*handle));
+        return;
+    }
+
+    VM *vm = (VM *)handle->runtime;
+
+    if (handle->kind == UMKA_HOST_HANDLE_VALUE && handle->type)
+    {
+        const Type *type = handle->type;
+        const Slot value = {.apiSlot = handle->value};
+        void *ptr = type->kind == TYPE_STR ? value.ptrVal : handle->storage;
+        doRefCntImpl(&vm->pages, ptr, type, TOK_MINUSMINUS);
+    }
+    else if (handle->kind == UMKA_HOST_HANDLE_DATA)
+    {
+        const Slot value = {.apiSlot = handle->value};
+        doRefCntImpl(&vm->pages, value.ptrVal, doHostHandlePtrVoidType(), TOK_MINUSMINUS);
+    }
+
+    free(handle->storage);
+    memset(handle, 0, sizeof(*handle));
+}
+
+
+bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot value)
+{
+    if (!vm || !handle || !doHostHandleValueTypeSupported(type))
+        return false;
+
+    void *storage = NULL;
+    int64_t storageSize = doHostHandleValueStorageSize(type);
+    Slot retained = value;
+
+    if (storageSize > 0)
+    {
+        if (!value.ptrVal)
+            return false;
+
+        storage = malloc(storageSize > 0 ? storageSize : 1);
+        if (!storage)
+            return false;
+
+        memcpy(storage, value.ptrVal, storageSize);
+        retained.ptrVal = storage;
+    }
+
+    void *ptr = type->kind == TYPE_STR ? retained.ptrVal : storage;
+    doRefCntImpl(&vm->pages, ptr, type, TOK_PLUSPLUS);
+
+    vmClearHostHandle(handle);
+
+    handle->runtime = vm;
+    handle->type = type;
+    handle->value = retained.apiSlot;
+    handle->storage = storage;
+    handle->storageSize = storageSize;
+    handle->kind = UMKA_HOST_HANDLE_VALUE;
+
+    return true;
+}
+
+
+bool vmRetainHostData(VM *vm, UmkaHostHandle *handle, void *ptr)
+{
+    if (!vm || !handle || !ptr)
+        return false;
+
+    HeapPage *page = pageFind(&vm->pages, ptr);
+    if (!page)
+        return false;
+
+    const HeapChunk *chunk = pageGetChunk(page, ptr);
+    if (chunk->isStack || ptr != (void *)chunk->data)
+        return false;
+
+    doRefCntImpl(&vm->pages, ptr, doHostHandlePtrVoidType(), TOK_PLUSPLUS);
+
+    vmClearHostHandle(handle);
+
+    Slot value = {.ptrVal = ptr};
+    handle->runtime = vm;
+    handle->type = NULL;
+    handle->value = value.apiSlot;
+    handle->storage = NULL;
+    handle->storageSize = 0;
+    handle->kind = UMKA_HOST_HANDLE_DATA;
+
     return true;
 }
 
