@@ -69,6 +69,18 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaRequestInterrupt  = umkaRequestInterrupt;
     umka->api.umkaClearInterrupt    = umkaClearInterrupt;
     umka->api.umkaInterruptRequested = umkaInterruptRequested;
+    umka->api.umkaGetTypeKind       = umkaGetTypeKind;
+    umka->api.umkaGetTypeName       = umkaGetTypeName;
+    umka->api.umkaGetTypeSize       = umkaGetTypeSize;
+    umka->api.umkaGetTypeSpelling   = umkaGetTypeSpelling;
+    umka->api.umkaGetFieldCount     = umkaGetFieldCount;
+    umka->api.umkaGetField          = umkaGetField;
+    umka->api.umkaGetFuncParamCount = umkaGetFuncParamCount;
+    umka->api.umkaGetFuncParamName  = umkaGetFuncParamName;
+    umka->api.umkaGetFuncParamType  = umkaGetFuncParamType;
+    umka->api.umkaGetFuncResultType = umkaGetFuncResultType;
+    umka->api.umkaGetAnySelf        = umkaGetAnySelf;
+    umka->api.umkaGetAnyValue       = umkaGetAnyValue;
 }
 
 

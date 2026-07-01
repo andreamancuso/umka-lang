@@ -11,4 +11,6 @@ box.tar
 /umka_windows_mingw/
 /umka_darwin/
 /tests/actual.log
+/tests/test.txt
+/tests/lib/lib.umi
 /benchmarks/actual.log

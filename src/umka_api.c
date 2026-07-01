@@ -409,9 +409,45 @@ UMKA_API void *umkaMakeStruct(Umka *umka, const UmkaType *type)
 }
 
 
-UMKA_API const UmkaType *umkaGetBaseType(const UmkaType *type) 
+static const Signature *apiGetFuncSignature(const UmkaType *type)
 {
-    if (type->kind == TYPE_PTR || type->kind == TYPE_WEAKPTR || type->kind == TYPE_ARRAY || type->kind == TYPE_DYNARRAY)
+    if (!type)
+        return NULL;
+
+    if (type->kind == TYPE_CLOSURE)
+    {
+        if (type->numItems <= 0 || !type->field[0] || !type->field[0]->type)
+            return NULL;
+        type = type->field[0]->type;
+    }
+
+    if (type->kind != TYPE_FN)
+        return NULL;
+
+    return type->sig;
+}
+
+
+static int apiGetFuncParamStart(const Signature *sig)
+{
+    return sig ? 1 : 0;
+}
+
+
+static int apiGetFuncParamCount(const Signature *sig)
+{
+    if (!sig)
+        return 0;
+
+    const int resultParams = typeStructured(sig->resultType) ? 1 : 0;
+    const int count = sig->numParams - apiGetFuncParamStart(sig) - resultParams;
+    return count > 0 ? count : 0;
+}
+
+
+UMKA_API const UmkaType *umkaGetBaseType(const UmkaType *type)
+{
+    if (type && (type->kind == TYPE_PTR || type->kind == TYPE_WEAKPTR || type->kind == TYPE_ARRAY || type->kind == TYPE_DYNARRAY || type->kind == TYPE_FIBER))
         return type->base;
     return NULL;
 }
@@ -436,7 +472,7 @@ UMKA_API const UmkaType *umkaGetResultType(UmkaStackSlot *params, UmkaStackSlot 
 
 UMKA_API const UmkaType *umkaGetFieldType(const UmkaType *structType, const char *fieldName)
 {
-    if (structType->kind == TYPE_STRUCT)
+    if (structType && structType->kind == TYPE_STRUCT)
     {
         const Field *field = typeFindField(structType, fieldName, NULL);
         if (field)
@@ -448,7 +484,7 @@ UMKA_API const UmkaType *umkaGetFieldType(const UmkaType *structType, const char
 
 UMKA_API const UmkaType *umkaGetMapKeyType(const UmkaType *mapType)
 {
-    if (mapType->kind == TYPE_MAP)
+    if (mapType && mapType->kind == TYPE_MAP)
         return typeMapKey(mapType);
     return NULL;
 }
@@ -456,9 +492,123 @@ UMKA_API const UmkaType *umkaGetMapKeyType(const UmkaType *mapType)
 
 UMKA_API const UmkaType *umkaGetMapItemType(const UmkaType *mapType)
 {
-    if (mapType->kind == TYPE_MAP)
+    if (mapType && mapType->kind == TYPE_MAP)
         return typeMapItem(mapType);
     return NULL;
+}
+
+
+UMKA_API UmkaTypeKind umkaGetTypeKind(const UmkaType *type)
+{
+    return type ? (UmkaTypeKind)type->kind : UMKA_TYPE_NONE;
+}
+
+
+UMKA_API const char *umkaGetTypeName(const UmkaType *type)
+{
+    return type && type->typeIdent ? type->typeIdent->name : NULL;
+}
+
+
+UMKA_API int umkaGetTypeSize(const UmkaType *type)
+{
+    return type ? type->size : 0;
+}
+
+
+UMKA_API int umkaGetTypeSpelling(const UmkaType *type, char *buf, int size)
+{
+    if (!type)
+    {
+        if (buf && size > 0)
+            buf[0] = 0;
+        return 0;
+    }
+
+    char typeBuf[DEFAULT_STR_LEN + 1];
+    typeSpelling(type, typeBuf);
+
+    if (buf && size > 0)
+        snprintf(buf, size, "%s", typeBuf);
+
+    return (int)strlen(typeBuf);
+}
+
+
+UMKA_API int umkaGetFieldCount(const UmkaType *type)
+{
+    return type && type->kind == TYPE_STRUCT ? type->numItems : 0;
+}
+
+
+UMKA_API bool umkaGetField(const UmkaType *type, int index, const char **name, const UmkaType **fieldType, int *offset)
+{
+    if (!type || type->kind != TYPE_STRUCT || index < 0 || index >= type->numItems)
+        return false;
+
+    const Field *field = type->field[index];
+    if (!field)
+        return false;
+
+    if (name)
+        *name = field->name;
+    if (fieldType)
+        *fieldType = field->type;
+    if (offset)
+        *offset = field->offset;
+
+    return true;
+}
+
+
+UMKA_API int umkaGetFuncParamCount(const UmkaType *type)
+{
+    return apiGetFuncParamCount(apiGetFuncSignature(type));
+}
+
+
+UMKA_API const char *umkaGetFuncParamName(const UmkaType *type, int index)
+{
+    const Signature *sig = apiGetFuncSignature(type);
+    if (index < 0 || index >= apiGetFuncParamCount(sig))
+        return NULL;
+
+    const Param *param = sig->param[index + apiGetFuncParamStart(sig)];
+    return param ? param->name : NULL;
+}
+
+
+UMKA_API const UmkaType *umkaGetFuncParamType(const UmkaType *type, int index)
+{
+    const Signature *sig = apiGetFuncSignature(type);
+    if (index < 0 || index >= apiGetFuncParamCount(sig))
+        return NULL;
+
+    const Param *param = sig->param[index + apiGetFuncParamStart(sig)];
+    return param ? param->type : NULL;
+}
+
+
+UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type)
+{
+    const Signature *sig = apiGetFuncSignature(type);
+    return sig ? sig->resultType : NULL;
+}
+
+
+UMKA_API bool umkaGetAnySelf(const UmkaAny *value, const UmkaType **selfType, void **self)
+{
+    return vmGetAnySelf(value, (const Type **)selfType, self);
+}
+
+
+UMKA_API bool umkaGetAnyValue(const UmkaAny *value, const UmkaType **type, UmkaStackSlot *slot)
+{
+    Slot result = {0};
+    bool ok = vmGetAnyValue(value, (const Type **)type, &result);
+    if (slot)
+        *slot = result.apiSlot;
+    return ok;
 }
 
 

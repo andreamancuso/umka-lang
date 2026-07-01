@@ -235,6 +235,8 @@ void vmClearHostHandle          (UmkaHostHandle *handle);
 bool vmHostHandleValid          (const UmkaHostHandle *handle);
 const Type *vmGetHostHandleType (const UmkaHostHandle *handle);
 Slot vmGetHostHandleValue       (const UmkaHostHandle *handle);
+bool vmGetAnySelf               (const UmkaAny *value, const Type **selfType, void **self);
+bool vmGetAnyValue              (const UmkaAny *value, const Type **type, Slot *slot);
 char *vmMakeStr                 (VM *vm, const char *str);
 void vmMakeDynArray             (VM *vm, DynArray *array, const Type *type, int len);
 void *vmMakeStruct              (VM *vm, const Type *type);

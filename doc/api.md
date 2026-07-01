@@ -500,6 +500,40 @@ typedef struct tagType UmkaType;
 Umka data type.
 
 ```
+typedef enum
+{
+    UMKA_TYPE_NONE,
+    UMKA_TYPE_FORWARD,
+    UMKA_TYPE_VOID,
+    UMKA_TYPE_NULL,
+    UMKA_TYPE_INT8,
+    UMKA_TYPE_INT16,
+    UMKA_TYPE_INT32,
+    UMKA_TYPE_INT,
+    UMKA_TYPE_UINT8,
+    UMKA_TYPE_UINT16,
+    UMKA_TYPE_UINT32,
+    UMKA_TYPE_UINT,
+    UMKA_TYPE_BOOL,
+    UMKA_TYPE_CHAR,
+    UMKA_TYPE_REAL32,
+    UMKA_TYPE_REAL,
+    UMKA_TYPE_PTR,
+    UMKA_TYPE_WEAKPTR,
+    UMKA_TYPE_ARRAY,
+    UMKA_TYPE_DYNARRAY,
+    UMKA_TYPE_STR,
+    UMKA_TYPE_MAP,
+    UMKA_TYPE_STRUCT,
+    UMKA_TYPE_INTERFACE,
+    UMKA_TYPE_CLOSURE,
+    UMKA_TYPE_FIBER,
+    UMKA_TYPE_FN
+} UmkaTypeKind;
+```
+Public Umka type category used by the type reflection API.
+
+```
 #define UmkaDynArray(T) struct \
 { \
     const UmkaType *type; \
@@ -592,15 +626,55 @@ Parameters:
 Returned value: Function result type, or `NULL` if `umkaGetResultType` is called from an `onFree` callback.
 
 ```
+UMKA_API UmkaTypeKind umkaGetTypeKind(const UmkaType *type);
+```
+Returns the public type category, or `UMKA_TYPE_NONE` for `NULL`.
+
+```
+UMKA_API const char *umkaGetTypeName(const UmkaType *type);
+```
+Returns the declared type name, or `NULL` for unnamed types and `NULL` input.
+
+```
+UMKA_API int umkaGetTypeSize(const UmkaType *type);
+```
+Returns the value storage size in bytes, or 0 for `NULL`.
+
+```
+UMKA_API int umkaGetTypeSpelling(const UmkaType *type, char *buf, int size);
+```
+Writes the source-style type spelling to `buf` and returns the full spelling length, not including the terminating null character. If `buf` is `NULL` or `size` is 0, only the length is returned. If the buffer is too small, the written string is truncated and null-terminated.
+
+```
 UMKA_API const UmkaType *umkaGetBaseType(const UmkaType *type);
 ```
-For a pointer type, returns the base type. For an array or dynamic array type, returns the item type.
+For a pointer, weak pointer, or fiber type, returns the base type. For an array or dynamic array type, returns the item type.
 
 Parameters:
 
-* `type`: Pointer, array or dynamic array type
+* `type`: Pointer, weak pointer, fiber, array, or dynamic array type
 
-Returned value: Base type of a pointer type; item type of an array or dynamic array type; `NULL` otherwise.
+Returned value: Base type of a pointer, weak pointer, or fiber type; item type of an array or dynamic array type; `NULL` otherwise.
+
+```
+UMKA_API int umkaGetFieldCount(const UmkaType *type);
+```
+Returns the number of fields in a structure type, or 0 for non-structure types and `NULL`.
+
+```
+UMKA_API bool umkaGetField(const UmkaType *type, int index, const char **name, const UmkaType **fieldType, int *offset);
+```
+Returns structure field metadata by index.
+
+Parameters:
+
+* `type`: Structure type
+* `index`: Zero-based field index
+* `name`: Optional output pointer for the field name
+* `fieldType`: Optional output pointer for the field type
+* `offset`: Optional output pointer for the byte offset within the structure
+
+Returned value: `true` if the field exists, otherwise `false`.
 
 ```
 UMKA_API const UmkaType *umkaGetFieldType(const UmkaType *structType, const char *fieldName);
@@ -635,6 +709,70 @@ Parameters:
 * `mapType`: Map type
 
 Returned value: Item type; `NULL` if `mapType` is not a map type.
+
+```
+UMKA_API int umkaGetFuncParamCount(const UmkaType *type);
+UMKA_API const char *umkaGetFuncParamName(const UmkaType *type, int index);
+UMKA_API const UmkaType *umkaGetFuncParamType(const UmkaType *type, int index);
+UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type);
+```
+Returns source-level function signature metadata for `fn` and closure types. Hidden VM parameters are not exposed.
+
+Parameters:
+
+* `type`: Function or closure type
+* `index`: Zero-based source parameter index
+
+Returned values:
+
+* `umkaGetFuncParamCount`: Number of source parameters, or 0 for non-function types
+* `umkaGetFuncParamName`: Parameter name, or `NULL` if unavailable
+* `umkaGetFuncParamType`: Parameter type, or `NULL` if unavailable
+* `umkaGetFuncResultType`: Result type, or `NULL` for non-function types
+
+```
+UMKA_API bool umkaGetAnySelf(const UmkaAny *value, const UmkaType **selfType, void **self);
+```
+Returns the raw self pointer and self pointer type stored in an `any` or interface value. This is for inspection only; callers should not depend on the private interface layout beyond this API.
+
+Parameters:
+
+* `value`: Pointer to an `UmkaAny` value or to the leading `UmkaAny` part of an interface value
+* `selfType`: Optional output pointer for the stored self type
+* `self`: Optional output pointer for the stored self value storage
+
+Returned value: `true` for a non-empty value with both self pointer and self type, otherwise `false`. Output pointers are still cleared or filled with the available raw fields when possible.
+
+```
+UMKA_API bool umkaGetAnyValue(const UmkaAny *value, const UmkaType **type, UmkaStackSlot *slot);
+```
+Deconstructs an `any` or interface value into its concrete type and value slot.
+
+Parameters:
+
+* `value`: Pointer to an `UmkaAny` value or to the leading `UmkaAny` part of an interface value
+* `type`: Optional output pointer for the concrete value type
+* `slot`: Optional output slot for the concrete value
+
+Returned value: `true` if the dynamic value has a concrete self value that can be deconstructed, otherwise `false`.
+
+Notes:
+
+* Scalar concrete values are returned in the matching `UmkaStackSlot` field
+* Direct `str`, pointer, weak pointer, fiber, and function concrete values are returned in their usual slot field
+* For dynamic arrays, maps, fixed arrays, structures, interfaces, and closures, `slot->ptrVal` points to the concrete value storage
+* The returned pointer is only as stable as the original Umka value unless the dynamic value has been retained in an `UmkaHostHandle`
+
+Example:
+
+```
+UmkaAny *value = (UmkaAny *)umkaGetParam(params, 0);
+const UmkaType *type = NULL;
+UmkaStackSlot slot = {0};
+
+if (umkaGetAnyValue(value, &type, &slot) && umkaGetTypeKind(type) == UMKA_TYPE_INT)
+    printf("%lld\n", (long long)slot.intVal);
+```
 
 ```
 UMKA_API void *umkaAllocData(Umka *umka, int size, UmkaExternFunc onFree);
@@ -800,15 +938,19 @@ Parameters:
 
 * `umka`: Interpreter instance handle
 * `handle`: Initialized host handle
-* `type`: Value type. Use `umkaGetParamType`, `umkaGetResultType`, `umkaGetFieldType`, `umkaGetMapKeyType`, or `umkaGetMapItemType`
-* `value`: Value to retain. For `str`, store the string pointer in `ptrVal`. For structured values such as dynamic arrays, maps, arrays, and structures, store a pointer to the value storage in `ptrVal`
+* `type`: Value type. Use `umkaGetParamType`, `umkaGetResultType`, `umkaGetFieldType`, `umkaGetMapKeyType`, `umkaGetMapItemType`, or the type returned by `umkaGetHostHandleType`
+* `value`: Value to retain. For `str`, store the string pointer in `ptrVal`. For structured values such as dynamic arrays, maps, arrays, structures, `any`, and interfaces, store a pointer to the value storage in `ptrVal`
 
 Returned value: `true` if the value has been retained, otherwise `false`.
 
 Notes:
 
-* Supported root value types are direct `str`, dynamic arrays, maps, fixed arrays, and structures
-* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected in this slice
+* Supported root value types are direct `str`, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
+* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly retained fields/items
+* Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, and structure values are supported
+* Non-empty interface method-table fields are preserved in the copied interface cell
+* Dynamic values whose concrete self is a pointer, weak pointer, interface, closure, fiber, or function value are rejected by retention, although `umkaGetAnyValue` can still inspect them
+* Empty dynamic values may be retained. `umkaGetAnyValue` returns `false` for them
 * For dynamic arrays and maps, the handle retains the existing backing heap storage; it does not deep-copy the array items or map nodes
 * For fixed arrays and structures, the handle stores a C-side byte copy and adjusts recursive reference counts for supported reference-bearing fields
 * `NULL` is a valid retained `str` value. Structured values require a non-`NULL` `ptrVal`
@@ -861,7 +1003,7 @@ Returns the retained value type, or `NULL` for empty handles and handles created
 ```
 UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle);
 ```
-Returns the retained value. For structured values, `ptrVal` points to stable handle-owned value storage until the handle is cleared. For empty handles, the returned slot is zeroed.
+Returns the retained value. For structured values, `ptrVal` points to stable handle-owned value storage until the handle is cleared. For retained `any` and interface values, `ptrVal` points to the copied interface cell; use `umkaGetAnyValue((UmkaAny *)slot.ptrVal, ...)` to inspect the concrete value. When passing a retained non-empty interface value back to Umka, copy `umkaGetTypeSize(umkaGetHostHandleType(handle))` bytes from `slot.ptrVal` into the destination interface storage. For empty handles, the returned slot is zeroed.
 
 ## Accessing Umka API dynamically
 

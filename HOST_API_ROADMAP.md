@@ -16,7 +16,7 @@ Add a safe host handle model for Umka heap values. The model should define retai
 
 Second fork slice status: `UmkaHostHandle`, `umkaMakeHostHandle`, `umkaRetainHostValue`, `umkaRetainHostData`, `umkaClearHostHandle`, `umkaReleaseHostHandle`, `umkaHostHandleValid`, `umkaGetHostHandleType`, and `umkaGetHostHandleValue` provide additive host-side rooting for direct `str`, dynamic arrays, maps, fixed arrays, fixed structures, and plain heap data chunks. Handles retain existing dynamic array and map backing storage rather than deep-copying contents. Handles must be cleared before `umkaFree`; they may be cleared after a runtime error while the owning interpreter still exists.
 
-Remaining handle work: broader policy and API coverage for pointers, weak pointers, interfaces, `any`, closures, fibers, function values, thread handoff, and managed wrapper integration.
+Remaining handle work: broader policy and API coverage for direct pointers, weak pointers, closures, fibers, function values, thread handoff, and managed wrapper integration.
 
 ## 3. Interrupt And Cancellation Support
 
@@ -30,7 +30,13 @@ Remaining interruption work: managed UmkaSharp cancellation-token integration, h
 
 ## 4. Closure, Interface, `any`, And Fiber Exposure
 
-Expose these only after rooted heap handles and lifetime rules exist. Closures need captured-upvalue ownership and reentrant call behavior. Interfaces and `any` need self-value rooting, type assertions, and method-table retention. Fibers need host-side creation/resume/status ownership rules.
+Fourth fork slice status: `UmkaTypeKind`, `umkaGetTypeKind`, `umkaGetTypeName`, `umkaGetTypeSize`, `umkaGetTypeSpelling`, `umkaGetFieldCount`, `umkaGetField`, `umkaGetFuncParamCount`, `umkaGetFuncParamName`, `umkaGetFuncParamType`, and `umkaGetFuncResultType` provide additive type reflection for host wrappers. `umkaGetAnySelf` and `umkaGetAnyValue` let hosts inspect the concrete value behind `any` and interface values without depending on private struct layouts.
+
+`UmkaHostHandle` can retain empty dynamic values and supported non-empty `any` or interface values by copying the full interface cell plus the concrete self value into handle-owned storage. Non-empty interface method-table fields are preserved. Supported retained concrete payloads are ordinal and real values, `str`, dynamic arrays, maps, fixed arrays, and structures whose contained fields/items are also supported.
+
+Unsupported or deliberately deferred dynamic payloads are pointers, weak pointers, nested interfaces, closures, fibers, and function values. `umkaGetAnyValue` can inspect these where the VM can deconstruct them, but `umkaRetainHostValue` rejects them because this fork does not yet define safe ownership, call/resume, reentrancy, or cross-frame lifetime rules for those shapes.
+
+Host construction of `any` and interface values remains out of scope. A safe constructor should reuse VM assignment, reference-counting, type assertion, and interface method-table setup semantics rather than requiring hosts to synthesize private interface cells.
 
 ## 5. UmkaSharp Integration
 

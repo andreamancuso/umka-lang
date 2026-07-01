@@ -1465,16 +1465,46 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
 }
 
 
+static bool doHostHandleInterfaceValueSupported(const Interface *interface)
+{
+    if (!interface)
+        return false;
+
+    if (!interface->self)
+        return true;
+
+    return interface->self &&
+           interface->selfType &&
+           interface->selfType->kind == TYPE_PTR &&
+           doHostHandleContainedTypeSupported(interface->selfType->base, 32);
+}
+
+
 static FORCE_INLINE int64_t doHostHandleValueStorageSize(const Type *type)
 {
     switch (type->kind)
     {
         case TYPE_DYNARRAY: return sizeof(DynArray);
         case TYPE_MAP:      return sizeof(Map);
+        case TYPE_INTERFACE:return type->size;
         case TYPE_ARRAY:
         case TYPE_STRUCT:   return type->size;
         default:            return 0;
     }
+}
+
+
+static FORCE_INLINE int64_t doHostHandleInterfaceSelfOffset(const Type *type)
+{
+    return align(type->size, sizeof(int64_t));
+}
+
+
+static FORCE_INLINE void *doHostHandleStoredRefPtr(const Type *type, void *storage)
+{
+    if (type->kind == TYPE_STR || type->kind == TYPE_PTR || type->kind == TYPE_FIBER)
+        return *(void **)storage;
+    return storage;
 }
 
 
@@ -4610,6 +4640,75 @@ Slot vmGetHostHandleValue(const UmkaHostHandle *handle)
 }
 
 
+bool vmGetAnySelf(const UmkaAny *value, const Type **selfType, void **self)
+{
+    const Interface *interface = (const Interface *)value;
+
+    if (selfType)
+        *selfType = interface ? interface->selfType : NULL;
+    if (self)
+        *self = interface ? interface->self : NULL;
+
+    return interface && interface->self && interface->selfType;
+}
+
+
+bool vmGetAnyValue(const UmkaAny *value, const Type **type, Slot *slot)
+{
+    const Interface *interface = (const Interface *)value;
+    Slot result = {0};
+
+    if (type)
+        *type = NULL;
+    if (slot)
+        *slot = result;
+
+    if (!interface || !interface->self || !interface->selfType || interface->selfType->kind != TYPE_PTR)
+        return false;
+
+    const Type *base = interface->selfType->base;
+    if (!base)
+        return false;
+
+    result.ptrVal = interface->self;
+
+    switch (base->kind)
+    {
+        case TYPE_INT8:         result.intVal     = *(int8_t        *)result.ptrVal; break;
+        case TYPE_INT16:        result.intVal     = *(int16_t       *)result.ptrVal; break;
+        case TYPE_INT32:        result.intVal     = *(int32_t       *)result.ptrVal; break;
+        case TYPE_INT:          result.intVal     = *(int64_t       *)result.ptrVal; break;
+        case TYPE_UINT8:        result.intVal     = *(uint8_t       *)result.ptrVal; break;
+        case TYPE_UINT16:       result.intVal     = *(uint16_t      *)result.ptrVal; break;
+        case TYPE_UINT32:       result.intVal     = *(uint32_t      *)result.ptrVal; break;
+        case TYPE_UINT:         result.uintVal    = *(uint64_t      *)result.ptrVal; break;
+        case TYPE_BOOL:         result.intVal     = *(bool          *)result.ptrVal; break;
+        case TYPE_CHAR:         result.intVal     = *(unsigned char *)result.ptrVal; break;
+        case TYPE_REAL32:       result.realVal    = *(float         *)result.ptrVal; break;
+        case TYPE_REAL:         result.realVal    = *(double        *)result.ptrVal; break;
+        case TYPE_PTR:          result.ptrVal     = *(void *        *)result.ptrVal; break;
+        case TYPE_WEAKPTR:      result.weakPtrVal = *(uint64_t      *)result.ptrVal; break;
+        case TYPE_STR:          result.ptrVal     = *(void **)result.ptrVal; break;
+        case TYPE_ARRAY:
+        case TYPE_DYNARRAY:
+        case TYPE_MAP:
+        case TYPE_STRUCT:
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:      break;
+        case TYPE_FIBER:        result.ptrVal     = *(void *        *)result.ptrVal; break;
+        case TYPE_FN:           result.intVal     = *(int64_t       *)result.ptrVal; break;
+        default:                return false;
+    }
+
+    if (type)
+        *type = base;
+    if (slot)
+        *slot = result;
+
+    return true;
+}
+
+
 void vmClearHostHandle(UmkaHostHandle *handle)
 {
     if (!handle)
@@ -4627,8 +4726,22 @@ void vmClearHostHandle(UmkaHostHandle *handle)
     {
         const Type *type = handle->type;
         const Slot value = {.apiSlot = handle->value};
-        void *ptr = type->kind == TYPE_STR ? value.ptrVal : handle->storage;
-        doRefCntImpl(&vm->pages, ptr, type, TOK_MINUSMINUS);
+
+        if (type->kind == TYPE_INTERFACE)
+        {
+            Interface *interface = (Interface *)handle->storage;
+            if (interface && interface->self && interface->selfType && interface->selfType->kind == TYPE_PTR)
+            {
+                const Type *base = interface->selfType->base;
+                if (base && base->isGarbageCollected)
+                    doRefCntImpl(&vm->pages, doHostHandleStoredRefPtr(base, interface->self), base, TOK_MINUSMINUS);
+            }
+        }
+        else
+        {
+            void *ptr = type->kind == TYPE_STR ? value.ptrVal : handle->storage;
+            doRefCntImpl(&vm->pages, ptr, type, TOK_MINUSMINUS);
+        }
     }
     else if (handle->kind == UMKA_HOST_HANDLE_DATA)
     {
@@ -4643,7 +4756,52 @@ void vmClearHostHandle(UmkaHostHandle *handle)
 
 bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot value)
 {
-    if (!vm || !handle || !doHostHandleValueTypeSupported(type))
+    if (!vm || !handle || !type)
+        return false;
+
+    if (type->kind == TYPE_INTERFACE)
+    {
+        const Interface *src = (const Interface *)value.ptrVal;
+        if (!doHostHandleInterfaceValueSupported(src))
+            return false;
+
+        const Type *base = src->self && src->selfType && src->selfType->kind == TYPE_PTR ? src->selfType->base : NULL;
+        const int64_t interfaceSize = type->size;
+        const int64_t selfOffset = base ? doHostHandleInterfaceSelfOffset(type) : interfaceSize;
+        const int64_t selfSize = base ? base->size : 0;
+        const int64_t storageSize = selfOffset + selfSize;
+        void *storage = malloc(storageSize > 0 ? storageSize : 1);
+        if (!storage)
+            return false;
+
+        memcpy(storage, src, interfaceSize);
+
+        Interface *retained = (Interface *)storage;
+        if (base)
+        {
+            void *selfStorage = (char *)storage + selfOffset;
+            Slot self = {.ptrVal = src->self};
+            doDerefImpl(&self, base->kind, vm->error);
+            doAssignImpl(selfStorage, self, base->kind, base->size, vm->error);
+            retained->self = selfStorage;
+
+            if (base->isGarbageCollected)
+                doRefCntImpl(&vm->pages, doHostHandleStoredRefPtr(base, selfStorage), base, TOK_PLUSPLUS);
+        }
+
+        vmClearHostHandle(handle);
+
+        handle->runtime = vm;
+        handle->type = type;
+        handle->value.ptrVal = storage;
+        handle->storage = storage;
+        handle->storageSize = storageSize;
+        handle->kind = UMKA_HOST_HANDLE_VALUE;
+
+        return true;
+    }
+
+    if (!doHostHandleValueTypeSupported(type))
         return false;
 
     void *storage = NULL;
