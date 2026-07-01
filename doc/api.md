@@ -220,6 +220,61 @@ Parameters:
 Returned value: 0 if the Umka function returns successfully and no run-time errors are detected, otherwise the error code.
 
 ```
+UMKA_API bool umkaCallableValid(const UmkaType *type, UmkaStackSlot value);
+```
+Checks whether a typed value is an initialized host-callable Umka `fn` or closure value.
+
+Parameters:
+
+* `type`: Function or closure type
+* `value`: Function entry offset in `intVal` for `fn`, or pointer to `UmkaClosure` storage in `ptrVal` for a closure
+
+Returned value: `true` if the value can be used with `umkaMakeCallableContext` and `umkaCallCallable`, otherwise `false`. Fibers are not callable through this API.
+
+```
+UMKA_API bool umkaMakeCallableContext(Umka *umka, const UmkaType *type, UmkaStackSlot value,
+                                      UmkaFuncContext *fn);
+```
+Fills in a function context for a typed `fn` or closure value.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `type`: Function or closure type
+* `value`: Function entry offset in `intVal` for `fn`, or pointer to `UmkaClosure` storage in `ptrVal` for a closure
+* `fn`: Function context to be filled in
+
+Returned value: `true` if the context has been created, otherwise `false`.
+
+Notes:
+
+* The context borrows the callable value. Retain the callable with `umkaRetainHostValue` if it must outlive the current callback, stack frame, or dynamic value being inspected
+* Set source-level arguments with `umkaGetParam(fn.params, index)` before calling `umkaCallCallable`
+* For structured return values, allocate result storage and put its pointer in `fn.result->ptrVal`, as with `umkaCall`
+
+```
+UMKA_API int umkaCallCallable(Umka *umka, const UmkaType *type, UmkaStackSlot value,
+                              UmkaFuncContext *fn);
+```
+Calls a typed `fn` or closure value using a context created by `umkaMakeCallableContext`.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `type`: Function or closure type
+* `value`: Function entry offset in `intVal` for `fn`, or pointer to `UmkaClosure` storage in `ptrVal` for a closure
+* `fn`: Function context with any explicit parameters already filled in
+
+Returned value: 0 if the callable returns successfully, otherwise the error code.
+
+Notes:
+
+* For closures, `umkaCallCallable` refreshes the hidden upvalue parameter and increments its reference before entering the VM. The called function consumes that parameter reference through normal Umka cleanup
+* A runtime error or interrupt during the callable follows the same rules as `umkaCall`: the interpreter is terminated, and retained handles may still be cleared before `umkaFree`
+* The callable must belong to the same interpreter and thread-affine execution context. It is not valid after `umkaFree`
+* Fibers are deliberately rejected. A fiber is a heap VM context with its own stack and scheduler parent, and `resume` changes the active VM fiber rather than performing an ordinary function call
+
+```
 UMKA_API UmkaStackSlot *umkaGetParam(UmkaStackSlot *params, int index);
 ```
 Finds function parameter slot.
@@ -930,16 +985,16 @@ Parameters:
 * `umka`: Interpreter instance handle
 * `dest`: Destination storage for a value of `type`. The storage must be zero-initialized or already contain a valid value of the same type
 * `type`: Destination value type
-* `value`: Source value. For `str`, store the string pointer in `ptrVal`. For dynamic arrays, maps, fixed arrays, structures, `any`, and interfaces, store a pointer to source value storage in `ptrVal`
+* `value`: Source value. For `str`, store the string pointer in `ptrVal`; for `fn`, store the entry offset in `intVal`; for dynamic arrays, maps, fixed arrays, structures, `any`, interfaces, and closures, store a pointer to source value storage in `ptrVal`
 
 Returned value: `true` if the value has been assigned, otherwise `false`.
 
 Notes:
 
 * The assignment increments references held by the new value, decrements references held by the old destination value, then copies the new value bytes
-* Supported types are ordinal and real values, `bool`, `char`, direct `str`, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
+* Supported types are ordinal and real values, `bool`, `char`, direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
 * Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items
-* Dynamic values whose concrete self is a pointer, weak pointer, interface, closure, fiber, or function value are rejected
+* Dynamic values whose concrete self is an ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, or supported closure are accepted. Pointer, weak pointer, nested interface, and fiber concrete values are rejected
 * Direct `str` values must be `NULL` or Umka strings created by `umkaMakeStr`
 * If `dest` is a parameter slot in an `UmkaFuncContext`, a successful `umkaCall` consumes that assigned parameter reference through normal function cleanup. Do not call `umkaReleaseHostValue` on that same parameter slot after the call returns. For host-owned storage that is not consumed by an Umka call, release it explicitly
 
@@ -1039,20 +1094,21 @@ Parameters:
 * `umka`: Interpreter instance handle
 * `handle`: Initialized host handle
 * `type`: Value type. Use `umkaGetParamType`, `umkaGetResultType`, `umkaGetFieldType`, `umkaGetMapKeyType`, `umkaGetMapItemType`, or the type returned by `umkaGetHostHandleType`
-* `value`: Value to retain. For `str`, store the string pointer in `ptrVal`. For structured values such as dynamic arrays, maps, arrays, structures, `any`, and interfaces, store a pointer to the value storage in `ptrVal`
+* `value`: Value to retain. For `str`, store the string pointer in `ptrVal`; for `fn`, store the entry offset in `intVal`; for structured values such as dynamic arrays, maps, arrays, structures, `any`, interfaces, and closures, store a pointer to the value storage in `ptrVal`
 
 Returned value: `true` if the value has been retained, otherwise `false`.
 
 Notes:
 
-* Supported root value types are direct `str`, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
+* Supported root value types are direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
 * Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly retained fields/items
-* Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, and structure values are supported
+* Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, and supported closure values are supported
 * Non-empty interface method-table fields are preserved in the copied interface cell
-* Dynamic values whose concrete self is a pointer, weak pointer, interface, closure, fiber, or function value are rejected by retention, although `umkaGetAnyValue` can still inspect them
+* Dynamic values whose concrete self is a pointer, weak pointer, nested interface, or fiber are rejected by retention, although `umkaGetAnyValue` can still inspect them
 * Empty dynamic values may be retained. `umkaGetAnyValue` returns `false` for them
 * For dynamic arrays and maps, the handle retains the existing backing heap storage; it does not deep-copy the array items or map nodes
 * For fixed arrays and structures, the handle stores a C-side byte copy and adjusts recursive reference counts for supported reference-bearing fields
+* For closures, the handle stores a C-side closure copy and retains the captured upvalue cell if it is non-empty and supported. A retained closure can be called with `umkaMakeCallableContext` and `umkaCallCallable`
 * `NULL` is a valid retained `str` value. Structured values require a non-`NULL` `ptrVal`
 
 ```

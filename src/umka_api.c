@@ -547,6 +547,52 @@ static int apiGetFuncParamCount(const Signature *sig)
 }
 
 
+static bool apiGetCallableInfo(const Type *type, Slot value, const Type **fnType, int64_t *entryOffset, const Interface **upvalue)
+{
+    if (fnType)
+        *fnType = NULL;
+    if (entryOffset)
+        *entryOffset = 0;
+    if (upvalue)
+        *upvalue = NULL;
+
+    if (!type)
+        return false;
+
+    if (type->kind == TYPE_FN)
+    {
+        if (!type->sig || value.intVal <= 0)
+            return false;
+
+        if (fnType)
+            *fnType = type;
+        if (entryOffset)
+            *entryOffset = value.intVal;
+        return true;
+    }
+
+    if (type->kind == TYPE_CLOSURE)
+    {
+        if (type->numItems <= 0 || !type->field[0] || !type->field[0]->type || type->field[0]->type->kind != TYPE_FN)
+            return false;
+
+        const Closure *closure = (const Closure *)value.ptrVal;
+        if (!closure || closure->entryOffset <= 0)
+            return false;
+
+        if (fnType)
+            *fnType = type->field[0]->type;
+        if (entryOffset)
+            *entryOffset = closure->entryOffset;
+        if (upvalue)
+            *upvalue = &closure->upvalue;
+        return true;
+    }
+
+    return false;
+}
+
+
 UMKA_API const UmkaType *umkaGetBaseType(const UmkaType *type)
 {
     if (type && (type->kind == TYPE_PTR || type->kind == TYPE_WEAKPTR || type->kind == TYPE_ARRAY || type->kind == TYPE_DYNARRAY || type->kind == TYPE_FIBER))
@@ -695,6 +741,65 @@ UMKA_API const UmkaType *umkaGetFuncResultType(const UmkaType *type)
 {
     const Signature *sig = apiGetFuncSignature(type);
     return sig ? sig->resultType : NULL;
+}
+
+
+UMKA_API bool umkaCallableValid(const UmkaType *type, UmkaStackSlot value)
+{
+    const Slot *valuePtr = (const Slot *)&value;
+    return apiGetCallableInfo(type, *valuePtr, NULL, NULL, NULL);
+}
+
+
+UMKA_API bool umkaMakeCallableContext(Umka *umka, const UmkaType *type, UmkaStackSlot value, UmkaFuncContext *fn)
+{
+    if (!umka || !fn)
+        return false;
+
+    const Slot *valuePtr = (const Slot *)&value;
+    const Type *fnType = NULL;
+    int64_t entryOffset = 0;
+    const Interface *upvalue = NULL;
+
+    if (!apiGetCallableInfo(type, *valuePtr, &fnType, &entryOffset, &upvalue))
+        return false;
+
+    compilerMakeFuncContext(umka, fnType, entryOffset, fn);
+
+    UmkaAny *destUpvalue = umkaGetUpvalue(fn->params);
+    if (destUpvalue)
+        *destUpvalue = upvalue ? *(const UmkaAny *)upvalue : (UmkaAny){0};
+
+    return true;
+}
+
+
+UMKA_API int umkaCallCallable(Umka *umka, const UmkaType *type, UmkaStackSlot value, UmkaFuncContext *fn)
+{
+    if (!umka || !fn)
+        return UMKA_ERR_RUNTIME;
+
+    const Slot *valuePtr = (const Slot *)&value;
+    const Type *fnType = NULL;
+    int64_t entryOffset = 0;
+    const Interface *upvalue = NULL;
+
+    if (!apiGetCallableInfo(type, *valuePtr, &fnType, &entryOffset, &upvalue) || fn->entryOffset != entryOffset || !fn->params)
+        return UMKA_ERR_RUNTIME;
+
+    UmkaAny *destUpvalue = umkaGetUpvalue(fn->params);
+    if (!destUpvalue)
+        return UMKA_ERR_RUNTIME;
+
+    *destUpvalue = upvalue ? *(const UmkaAny *)upvalue : (UmkaAny){0};
+
+    if (!vmAlive(&umka->vm) || (typeStructured(fnType->sig->resultType) && (!fn->result || !fn->result->ptrVal)))
+        return umkaCall(umka, fn);
+
+    if (upvalue && upvalue->self)
+        vmIncRef(&umka->vm, destUpvalue, fnType->sig->param[0]->type);
+
+    return umkaCall(umka, fn);
 }
 
 

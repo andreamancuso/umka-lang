@@ -1415,6 +1415,9 @@ static void doRefCntImpl(HeapPages *pages, void *ptr, const Type *type, TokenKin
 }
 
 
+static bool doHostHandleClosureValueSupported(const Closure *closure);
+
+
 static bool doHostHandleContainedTypeSupported(const Type *type, int depth)
 {
     if (!type || depth <= 0)
@@ -1452,12 +1455,18 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
 
     switch (type->kind)
     {
+        case TYPE_FN:
+            return true;
+
         case TYPE_STR:
         case TYPE_DYNARRAY:
         case TYPE_MAP:
         case TYPE_ARRAY:
         case TYPE_STRUCT:
             return doHostHandleContainedTypeSupported(type, 32);
+
+        case TYPE_CLOSURE:
+            return true;
 
         default:
             return false;
@@ -1473,10 +1482,25 @@ static bool doHostHandleInterfaceValueSupported(const Interface *interface)
     if (!interface->self)
         return true;
 
-    return interface->self &&
-           interface->selfType &&
-           interface->selfType->kind == TYPE_PTR &&
-           doHostHandleContainedTypeSupported(interface->selfType->base, 32);
+    if (!interface->self || !interface->selfType || interface->selfType->kind != TYPE_PTR || !interface->selfType->base)
+        return false;
+
+    const Type *base = interface->selfType->base;
+    if (base->kind == TYPE_FN)
+        return *(int64_t *)interface->self > 0;
+
+    if (base->kind == TYPE_CLOSURE)
+        return doHostHandleClosureValueSupported((const Closure *)interface->self);
+
+    return doHostHandleContainedTypeSupported(base, 32);
+}
+
+
+static bool doHostHandleClosureValueSupported(const Closure *closure)
+{
+    return closure &&
+           closure->entryOffset > 0 &&
+           doHostHandleInterfaceValueSupported(&closure->upvalue);
 }
 
 
@@ -1485,7 +1509,7 @@ static bool doHostAssignableTypeSupported(const Type *type)
     if (!type)
         return false;
 
-    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR)
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN)
         return true;
 
     switch (type->kind)
@@ -1497,6 +1521,7 @@ static bool doHostAssignableTypeSupported(const Type *type)
             return doHostHandleContainedTypeSupported(type, 32);
 
         case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
             return true;
 
         default:
@@ -1512,6 +1537,12 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
 
     if (type->kind == TYPE_STR)
         return !value.ptrVal || pageFind(pages, value.ptrVal);
+
+    if (type->kind == TYPE_FN)
+        return value.intVal > 0;
+
+    if (type->kind == TYPE_CLOSURE)
+        return doHostHandleClosureValueSupported((const Closure *)value.ptrVal);
 
     if (type->kind == TYPE_INTERFACE)
         return value.ptrVal && doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal);
@@ -1545,6 +1576,7 @@ static FORCE_INLINE int64_t doHostHandleValueStorageSize(const Type *type)
         case TYPE_DYNARRAY: return sizeof(DynArray);
         case TYPE_MAP:      return sizeof(Map);
         case TYPE_INTERFACE:return type->size;
+        case TYPE_CLOSURE:
         case TYPE_ARRAY:
         case TYPE_STRUCT:   return type->size;
         default:            return 0;
@@ -4943,6 +4975,12 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
     }
 
     if (!doHostHandleValueTypeSupported(type))
+        return false;
+
+    if (type->kind == TYPE_FN && value.intVal <= 0)
+        return false;
+
+    if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported((const Closure *)value.ptrVal))
         return false;
 
     void *storage = NULL;

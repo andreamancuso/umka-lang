@@ -39,6 +39,7 @@ enum
 static UmkaHostHandle anyHandles[ANY_COUNT];
 static UmkaHostHandle speakerHandle;
 static UmkaHostHandle nullHandle;
+static UmkaHostHandle closureAnyHandle;
 static int anyIndex = 0;
 static int callbackFailures = 0;
 static int funcTypeCaptured = 0;
@@ -52,7 +53,7 @@ static const char *source =
     "fn hostCaptureAny*(v: any)\n"
     "fn hostCaptureSpeaker*(s: Speaker)\n"
     "fn hostCaptureNullAny*(v: any)\n"
-    "fn hostCaptureUnsupportedAny*(v: any)\n"
+    "fn hostCaptureClosureAny*(v: any)\n"
     "fn hostCaptureFuncType*(f: fn (a: int, b: str): real)\n"
     "\n"
     "fn (d: ^Dog) speak(): str {\n"
@@ -89,8 +90,8 @@ static const char *source =
     "    hostCaptureNullAny(v)\n"
     "}\n"
     "\n"
-    "fn emitUnsupportedAny*() {\n"
-    "    hostCaptureUnsupportedAny(fn (): int {return 1})\n"
+    "fn emitClosureAny*() {\n"
+    "    hostCaptureClosureAny(fn (): int {return 1})\n"
     "}\n"
     "\n"
     "fn anyInt*(v: any): int {\n"
@@ -351,7 +352,7 @@ static void hostCaptureNullAny(UmkaStackSlot *params, UmkaStackSlot *result)
 }
 
 
-static void hostCaptureUnsupportedAny(UmkaStackSlot *params, UmkaStackSlot *result)
+static void hostCaptureClosureAny(UmkaStackSlot *params, UmkaStackSlot *result)
 {
     Umka *umka = umkaGetInstance(result);
     UmkaAPI *api = umkaGetAPI(umka);
@@ -359,22 +360,25 @@ static void hostCaptureUnsupportedAny(UmkaStackSlot *params, UmkaStackSlot *resu
     UmkaAny *value = (UmkaAny *)api->umkaGetParam(params, 0);
     const UmkaType *dynamicType = NULL;
     UmkaStackSlot slot = {0};
-    UmkaHostHandle unsupported = {0};
+    UmkaHostHandle retained = {0};
 
     if (!api->umkaGetAnyValue(value, &dynamicType, &slot) ||
-        !expectKind(api, dynamicType, UMKA_TYPE_CLOSURE, "unsupported any"))
+        !expectKind(api, dynamicType, UMKA_TYPE_CLOSURE, "closure any"))
     {
-        noteCallbackFailure("unsupported any inspect");
+        noteCallbackFailure("closure any inspect");
         return;
     }
 
     slot.ptrVal = value;
-    api->umkaMakeHostHandle(&unsupported);
-    if (api->umkaRetainHostValue(umka, &unsupported, type, slot))
+    api->umkaMakeHostHandle(&retained);
+    if (!api->umkaRetainHostValue(umka, &retained, type, slot))
     {
-        api->umkaClearHostHandle(&unsupported);
-        noteCallbackFailure("unsupported closure any retained");
+        noteCallbackFailure("closure any retain");
+        return;
     }
+
+    api->umkaClearHostHandle(&closureAnyHandle);
+    closureAnyHandle = retained;
 }
 
 
@@ -544,6 +548,7 @@ static void clearHandles(void)
 
     umkaClearHostHandle(&speakerHandle);
     umkaClearHostHandle(&nullHandle);
+    umkaClearHostHandle(&closureAnyHandle);
 }
 
 
@@ -555,6 +560,7 @@ int main(void)
         umkaMakeHostHandle(&anyHandles[i]);
     umkaMakeHostHandle(&speakerHandle);
     umkaMakeHostHandle(&nullHandle);
+    umkaMakeHostHandle(&closureAnyHandle);
 
     Umka *umka = umkaAlloc();
     if (!umka)
@@ -570,7 +576,7 @@ int main(void)
     umkaAddFunc(umka, "hostCaptureAny", hostCaptureAny);
     umkaAddFunc(umka, "hostCaptureSpeaker", hostCaptureSpeaker);
     umkaAddFunc(umka, "hostCaptureNullAny", hostCaptureNullAny);
-    umkaAddFunc(umka, "hostCaptureUnsupportedAny", hostCaptureUnsupportedAny);
+    umkaAddFunc(umka, "hostCaptureClosureAny", hostCaptureClosureAny);
     umkaAddFunc(umka, "hostCaptureFuncType", hostCaptureFuncType);
 
     if (!umkaCompile(umka))
@@ -598,7 +604,7 @@ int main(void)
     status |= callSpeakerWithRetainedHandle(umka);
 
     status |= callNoArgs(umka, "emitNullAny");
-    status |= callNoArgs(umka, "emitUnsupportedAny");
+    status |= callNoArgs(umka, "emitClosureAny");
     if (callbackFailures)
         status = 1;
 

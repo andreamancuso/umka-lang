@@ -85,6 +85,9 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaReleaseHostValue  = umkaReleaseHostValue;
     umka->api.umkaMakeAny           = umkaMakeAny;
     umka->api.umkaMakeInterface     = umkaMakeInterface;
+    umka->api.umkaCallableValid     = umkaCallableValid;
+    umka->api.umkaMakeCallableContext = umkaMakeCallableContext;
+    umka->api.umkaCallCallable      = umkaCallCallable;
 }
 
 
