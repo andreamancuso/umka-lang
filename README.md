@@ -1,3 +1,13 @@
+# Umka fork for UmkaSharp
+
+This repository is a fork of the upstream Umka language implementation by Vladimir Tereshkov.
+
+This fork keeps Umka's language and runtime behavior intact while adding public C host-embedding APIs used by UmkaSharp, including type reflection, host value handles, map and dynamic-array helpers, callable/default-parameter support, and fiber retention/resume APIs.
+
+For the upstream project, see [vtereshkov/umka-lang](https://github.com/vtereshkov/umka-lang).
+
+---
+
 <img src="https://github.com/vtereshkov/umka-lang/blob/master/resources/logo.svg" width="320">
 
 [![CI](https://github.com/vtereshkov/umka-lang/workflows/CI/badge.svg)](https://github.com/vtereshkov/umka-lang/actions)
