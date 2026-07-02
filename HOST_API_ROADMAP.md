@@ -8,7 +8,7 @@ Add public C APIs for host-side map allocation, insertion, assignment/reference-
 
 First fork slice status: `umkaMakeMap` and `umkaSetMapItem` provide additive host-side creation and insertion for fixed-layout non-reference key/item maps plus direct `str` key/item maps. This covers the initial UmkaSharp shapes needed for C# map arguments and callback map results, including `map[int]int`, `map[str]int`, and `map[str]str`.
 
-Remaining map work: arbitrary map construction for dynamic arrays, pointers, interfaces, closures, fibers, `any`, nested maps, and structures or arrays that contain unsupported reference-bearing fields.
+Remaining map construction work: arbitrary map construction for dynamic arrays, pointers, interfaces, closures, fibers, `any`, nested maps, and structures or arrays that contain unsupported reference-bearing fields.
 
 ## 2. Rooted Heap Value Handles
 
@@ -50,7 +50,13 @@ Current callable limits: callable contexts borrow the callable value and do not 
 
 Seventh fork slice status: `umkaSetDefaultParam` and `umkaSetDefaultParams` provide additive host-side default-parameter materialization for existing `UmkaFuncContext` values. They use source-level parameter indices/counts, preserve hidden VM parameter conventions internally, validate the reflected function parameter type against the context slot type, and support the scalar, pointer, and `str` defaults needed by UmkaSharp. Unsupported defaults currently return `false` for dynamic arrays, maps, interfaces, closures, fibers, `any`, weak pointers, and aggregate values rather than exposing or copying private default storage.
 
-Once UmkaSharp consumes this slice, `native/umka_shim.c` should no longer need to read `fnType->sig->param[...]` or `Param.defaultVal` directly.
+Once UmkaSharp consumes the default-parameter slice, `native/umka_shim.c` should no longer need to read `fnType->sig->param[...]` or `Param.defaultVal` directly.
+
+Eighth fork slice status: `umkaGetHostMapCount`, `umkaGetHostMapEntry`, `umkaGetHostMapEntryKey`, `umkaGetHostMapEntryValue`, `umkaGetHostMapEntryStringKey`, `umkaGetHostMapEntryAnyValue`, `umkaRetainHostMapEntryKey`, and `umkaRetainHostMapEntryValue` provide retained read-only map inspection without exposing `Map`, `MapNode`, heap page, stack, or private `Type` layout. A host can retain a map value, count entries, read entry descriptors by index, read direct `str` keys, read scalar slots, inspect built-in `any` item cells, and retain supported entry keys or values.
+
+The first intended consumer shape is `map[str]any` returned by Umka. Retention now validates actual nested map and array contents, so supported interface, `any`, and closure payloads can be retained when their concrete values are supported. Fiber payloads still fail cleanly because this fork does not define host-side fiber ownership, resume, or disposal rules.
+
+Remaining read-only map work: managed UmkaSharp wrappers, mutation/versioning rules for entry descriptors, arbitrary reference-bearing key policies, and clearer long-term support for nested interface payloads. Remaining map construction work is still handled separately by `umkaMakeMap` and `umkaSetMapItem`; host-created arbitrary `map[str]any` values are not provided by this inspection slice.
 
 ## 5. UmkaSharp Integration
 

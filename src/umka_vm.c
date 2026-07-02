@@ -1416,6 +1416,7 @@ static void doRefCntImpl(HeapPages *pages, void *ptr, const Type *type, TokenKin
 
 
 static bool doHostHandleClosureValueSupported(const Closure *closure);
+static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int depth, Error *error);
 
 
 static bool doHostHandleContainedTypeSupported(const Type *type, int depth)
@@ -1448,6 +1449,40 @@ static bool doHostHandleContainedTypeSupported(const Type *type, int depth)
 }
 
 
+static bool doHostHandleRetainContainedTypeSupported(const Type *type, int depth)
+{
+    if (!type || depth <= 0)
+        return false;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR)
+        return true;
+
+    switch (type->kind)
+    {
+        case TYPE_DYNARRAY:
+        case TYPE_ARRAY:
+            return doHostHandleRetainContainedTypeSupported(type->base, depth - 1);
+
+        case TYPE_MAP:
+            return doHostHandleRetainContainedTypeSupported(typeMapKey(type), depth - 1) &&
+                   doHostHandleRetainContainedTypeSupported(typeMapItem(type), depth - 1);
+
+        case TYPE_STRUCT:
+            for (int i = 0; i < type->numItems; i++)
+                if (!doHostHandleRetainContainedTypeSupported(type->field[i]->type, depth - 1))
+                    return false;
+            return true;
+
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
 static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
 {
     if (!type)
@@ -1463,7 +1498,7 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
         case TYPE_MAP:
         case TYPE_ARRAY:
         case TYPE_STRUCT:
-            return doHostHandleContainedTypeSupported(type, 32);
+            return doHostHandleRetainContainedTypeSupported(type, 32);
 
         case TYPE_CLOSURE:
             return true;
@@ -1519,6 +1554,32 @@ static bool doHostAssignableTypeSupported(const Type *type)
         case TYPE_ARRAY:
         case TYPE_STRUCT:
             return doHostHandleContainedTypeSupported(type, 32);
+
+        case TYPE_INTERFACE:
+        case TYPE_CLOSURE:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
+static bool doHostReleasableTypeSupported(const Type *type)
+{
+    if (!type)
+        return false;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN)
+        return true;
+
+    switch (type->kind)
+    {
+        case TYPE_DYNARRAY:
+        case TYPE_MAP:
+        case TYPE_ARRAY:
+        case TYPE_STRUCT:
+            return doHostHandleRetainContainedTypeSupported(type, 32);
 
         case TYPE_INTERFACE:
         case TYPE_CLOSURE:
@@ -1856,6 +1917,142 @@ static FORCE_INLINE void doGetMapKeys(const Map *map, void *keys, Error *error)
     doGetMapKeysRecursively(map, map->root, keys, &numKeys, error);
     if (UNLIKELY(numKeys != map->root->len))
         error->runtimeHandler(error->context, ERR_RUNTIME, "Wrong number of map keys");
+}
+
+
+static const MapNode *doGetMapNodeAtIndexRecursively(const MapNode *node, int64_t *index)
+{
+    if (!node)
+        return NULL;
+
+    const MapNode *found = doGetMapNodeAtIndexRecursively(node->left, index);
+    if (found)
+        return found;
+
+    if (node->key)
+    {
+        if (*index == 0)
+            return node;
+        (*index)--;
+    }
+
+    return doGetMapNodeAtIndexRecursively(node->right, index);
+}
+
+
+static const MapNode *doGetMapNodeAtIndex(const Map *map, int64_t index)
+{
+    if (!map || !map->root || index < 0 || index >= map->root->len)
+        return NULL;
+
+    return doGetMapNodeAtIndexRecursively(map->root, &index);
+}
+
+
+static bool doHostHandleRetainArrayItemsSupported(const Type *itemType, const void *items, int64_t len, int64_t itemSize, int depth, Error *error)
+{
+    if (!itemType || !items || len < 0 || itemSize <= 0)
+        return false;
+
+    for (int64_t i = 0; i < len; i++)
+    {
+        Slot item = {.ptrVal = (char *)items + i * itemSize};
+        doDerefImpl(&item, itemType->kind, error);
+        if (!doHostHandleRetainValueSupported(itemType, item, depth - 1, error))
+            return false;
+    }
+
+    return true;
+}
+
+
+static bool doHostHandleRetainMapNodesSupported(const Map *map, const MapNode *node, int depth, Error *error)
+{
+    if (!node)
+        return true;
+
+    if (!doHostHandleRetainMapNodesSupported(map, node->left, depth, error))
+        return false;
+
+    if (node->key)
+    {
+        const Type *keyType = typeMapKey(map->type);
+        const Type *itemType = typeMapItem(map->type);
+        Slot key = {.ptrVal = node->key};
+        Slot item = {.ptrVal = node->data};
+
+        if (!node->data)
+            return false;
+
+        doDerefImpl(&key, keyType->kind, error);
+        doDerefImpl(&item, itemType->kind, error);
+
+        if (!doHostHandleRetainValueSupported(keyType, key, depth - 1, error) ||
+            !doHostHandleRetainValueSupported(itemType, item, depth - 1, error))
+            return false;
+    }
+
+    return doHostHandleRetainMapNodesSupported(map, node->right, depth, error);
+}
+
+
+static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int depth, Error *error)
+{
+    if (!type || depth <= 0)
+        return false;
+
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind))
+        return true;
+
+    switch (type->kind)
+    {
+        case TYPE_STR:
+            return true;
+
+        case TYPE_FN:
+            return value.intVal > 0;
+
+        case TYPE_DYNARRAY:
+        {
+            const DynArray *array = (const DynArray *)value.ptrVal;
+            return array && array->type && typeEquivalent(array->type, type) && array->data &&
+                   doHostHandleRetainArrayItemsSupported(type->base, array->data, getDims(array)->len, array->itemSize, depth, error);
+        }
+
+        case TYPE_MAP:
+        {
+            const Map *map = (const Map *)value.ptrVal;
+            return map && map->type && typeEquivalent(map->type, type) && map->root &&
+                   doHostHandleRetainMapNodesSupported(map, map->root, depth, error);
+        }
+
+        case TYPE_ARRAY:
+            return value.ptrVal &&
+                   doHostHandleRetainArrayItemsSupported(type->base, value.ptrVal, type->numItems, type->base->size, depth, error);
+
+        case TYPE_STRUCT:
+            if (!value.ptrVal)
+                return false;
+
+            for (int i = 0; i < type->numItems; i++)
+            {
+                const Type *fieldType = type->field[i]->type;
+                Slot field = {.ptrVal = (char *)value.ptrVal + type->field[i]->offset};
+                doDerefImpl(&field, fieldType->kind, error);
+                if (!doHostHandleRetainValueSupported(fieldType, field, depth - 1, error))
+                    return false;
+            }
+            return true;
+
+        case TYPE_INTERFACE:
+            return doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal);
+
+        case TYPE_CLOSURE:
+            return doHostHandleClosureValueSupported((const Closure *)value.ptrVal);
+
+        default:
+            return false;
+    }
 }
 
 
@@ -4730,6 +4927,186 @@ Slot vmGetHostHandleValue(const UmkaHostHandle *handle)
 }
 
 
+static bool doGetHostMap(VM *vm, const UmkaHostHandle *mapHandle, const Map **map, const Type **mapType)
+{
+    if (map)
+        *map = NULL;
+    if (mapType)
+        *mapType = NULL;
+
+    if (!vm || !vmHostHandleValid(mapHandle) || mapHandle->runtime != vm || mapHandle->kind != UMKA_HOST_HANDLE_VALUE)
+        return false;
+
+    const Type *type = mapHandle->type;
+    if (!type || type->kind != TYPE_MAP)
+        return false;
+
+    Slot value = vmGetHostHandleValue(mapHandle);
+    const Map *result = (const Map *)value.ptrVal;
+    if (!result || !result->type || !typeEquivalent(result->type, type) || !result->root)
+        return false;
+
+    if (map)
+        *map = result;
+    if (mapType)
+        *mapType = type;
+    return true;
+}
+
+
+static bool doGetHostMapEntryNode(VM *vm, const UmkaHostMapEntry *entry, const Map **map, const Type **mapType, const MapNode **node)
+{
+    if (node)
+        *node = NULL;
+
+    const Map *resolvedMap = NULL;
+    const Type *resolvedType = NULL;
+    if (!entry || !doGetHostMap(vm, entry->mapHandle, &resolvedMap, &resolvedType))
+        return false;
+
+    if (entry->index < 0 ||
+        entry->keyType != (const UmkaType *)typeMapKey(resolvedType) ||
+        entry->itemType != (const UmkaType *)typeMapItem(resolvedType))
+        return false;
+
+    const MapNode *resolvedNode = doGetMapNodeAtIndex(resolvedMap, entry->index);
+    if (!resolvedNode || !resolvedNode->key || !resolvedNode->data)
+        return false;
+
+    if (map)
+        *map = resolvedMap;
+    if (mapType)
+        *mapType = resolvedType;
+    if (node)
+        *node = resolvedNode;
+    return true;
+}
+
+
+bool vmGetHostMapCount(VM *vm, const UmkaHostHandle *mapHandle, int64_t *count)
+{
+    if (count)
+        *count = 0;
+
+    const Map *map = NULL;
+    if (!count || !doGetHostMap(vm, mapHandle, &map, NULL))
+        return false;
+
+    *count = map->root ? map->root->len : 0;
+    return true;
+}
+
+
+bool vmGetHostMapEntry(VM *vm, const UmkaHostHandle *mapHandle, int64_t index, UmkaHostMapEntry *entry)
+{
+    if (entry)
+        memset(entry, 0, sizeof(*entry));
+
+    const Map *map = NULL;
+    const Type *mapType = NULL;
+    if (!entry || !doGetHostMap(vm, mapHandle, &map, &mapType) || index < 0 || !doGetMapNodeAtIndex(map, index))
+        return false;
+
+    entry->mapHandle = mapHandle;
+    entry->index = index;
+    entry->keyType = (const UmkaType *)typeMapKey(mapType);
+    entry->itemType = (const UmkaType *)typeMapItem(mapType);
+    return true;
+}
+
+
+bool vmGetHostMapEntryKey(VM *vm, const UmkaHostMapEntry *entry, Slot *key)
+{
+    if (key)
+        memset(key, 0, sizeof(*key));
+
+    const MapNode *node = NULL;
+    const Type *mapType = NULL;
+    if (!key || !doGetHostMapEntryNode(vm, entry, NULL, &mapType, &node))
+        return false;
+
+    const Type *keyType = typeMapKey(mapType);
+    key->ptrVal = node->key;
+    doDerefImpl(key, keyType->kind, vm->error);
+    return true;
+}
+
+
+bool vmGetHostMapEntryValue(VM *vm, const UmkaHostMapEntry *entry, Slot *value)
+{
+    if (value)
+        memset(value, 0, sizeof(*value));
+
+    const MapNode *node = NULL;
+    const Type *mapType = NULL;
+    if (!value || !doGetHostMapEntryNode(vm, entry, NULL, &mapType, &node))
+        return false;
+
+    const Type *itemType = typeMapItem(mapType);
+    value->ptrVal = node->data;
+    doDerefImpl(value, itemType->kind, vm->error);
+    return true;
+}
+
+
+bool vmGetHostMapEntryStringKey(VM *vm, const UmkaHostMapEntry *entry, const char **key)
+{
+    if (key)
+        *key = NULL;
+
+    if (!key || !entry || !entry->keyType || ((const Type *)entry->keyType)->kind != TYPE_STR)
+        return false;
+
+    Slot value = {0};
+    if (!vmGetHostMapEntryKey(vm, entry, &value))
+        return false;
+
+    *key = (const char *)value.ptrVal;
+    return true;
+}
+
+
+bool vmGetHostMapEntryAnyValue(VM *vm, const UmkaHostMapEntry *entry, UmkaAny *value)
+{
+    if (value)
+        memset(value, 0, sizeof(*value));
+
+    const MapNode *node = NULL;
+    const Type *mapType = NULL;
+    if (!value || !doGetHostMapEntryNode(vm, entry, NULL, &mapType, &node))
+        return false;
+
+    const Type *itemType = typeMapItem(mapType);
+    if (itemType->kind != TYPE_INTERFACE || itemType->numItems != 2 || !node->data)
+        return false;
+
+    *value = *(const UmkaAny *)node->data;
+    return true;
+}
+
+
+bool vmRetainHostMapEntryKey(VM *vm, const UmkaHostMapEntry *entry, UmkaHostHandle *handle)
+{
+    if (!entry || !entry->keyType)
+        return false;
+
+    Slot key = {0};
+    return vmGetHostMapEntryKey(vm, entry, &key) &&
+           vmRetainHostValue(vm, handle, (const Type *)entry->keyType, key);
+}
+
+
+bool vmRetainHostMapEntryValue(VM *vm, const UmkaHostMapEntry *entry, UmkaHostHandle *handle)
+{
+    if (!entry || !entry->itemType)
+        return false;
+
+    Slot value = {0};
+    return vmGetHostMapEntryValue(vm, entry, &value) &&
+           vmRetainHostValue(vm, handle, (const Type *)entry->itemType, value);
+}
+
+
 bool vmGetAnySelf(const UmkaAny *value, const Type **selfType, void **self)
 {
     const Interface *interface = (const Interface *)value;
@@ -4820,7 +5197,7 @@ bool vmAssignHostValue(VM *vm, void *dest, const Type *type, Slot value)
 
 bool vmReleaseHostValue(VM *vm, void *dest, const Type *type)
 {
-    if (!vm || !dest || !doHostAssignableTypeSupported(type))
+    if (!vm || !dest || !doHostReleasableTypeSupported(type))
         return false;
 
     if (type->isGarbageCollected)
@@ -4981,6 +5358,9 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
         return false;
 
     if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported((const Closure *)value.ptrVal))
+        return false;
+
+    if (!doHostHandleRetainValueSupported(type, value, 32, vm->error))
         return false;
 
     void *storage = NULL;

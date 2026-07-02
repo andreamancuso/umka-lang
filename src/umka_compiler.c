@@ -66,6 +66,14 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaHostHandleValid   = umkaHostHandleValid;
     umka->api.umkaGetHostHandleType = umkaGetHostHandleType;
     umka->api.umkaGetHostHandleValue = umkaGetHostHandleValue;
+    umka->api.umkaGetHostMapCount   = umkaGetHostMapCount;
+    umka->api.umkaGetHostMapEntry   = umkaGetHostMapEntry;
+    umka->api.umkaGetHostMapEntryKey = umkaGetHostMapEntryKey;
+    umka->api.umkaGetHostMapEntryValue = umkaGetHostMapEntryValue;
+    umka->api.umkaGetHostMapEntryStringKey = umkaGetHostMapEntryStringKey;
+    umka->api.umkaGetHostMapEntryAnyValue = umkaGetHostMapEntryAnyValue;
+    umka->api.umkaRetainHostMapEntryKey = umkaRetainHostMapEntryKey;
+    umka->api.umkaRetainHostMapEntryValue = umkaRetainHostMapEntryValue;
     umka->api.umkaRequestInterrupt  = umkaRequestInterrupt;
     umka->api.umkaClearInterrupt    = umkaClearInterrupt;
     umka->api.umkaInterruptRequested = umkaInterruptRequested;

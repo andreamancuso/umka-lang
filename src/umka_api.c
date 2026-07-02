@@ -327,6 +327,62 @@ UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle)
 }
 
 
+UMKA_API bool umkaGetHostMapCount(Umka *umka, const UmkaHostHandle *mapHandle, int64_t *count)
+{
+    return umka && vmGetHostMapCount(&umka->vm, mapHandle, count);
+}
+
+
+UMKA_API bool umkaGetHostMapEntry(Umka *umka, const UmkaHostHandle *mapHandle, int64_t index, UmkaHostMapEntry *entry)
+{
+    return umka && vmGetHostMapEntry(&umka->vm, mapHandle, index, entry);
+}
+
+
+UMKA_API bool umkaGetHostMapEntryKey(Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *key)
+{
+    Slot result = {0};
+    bool ok = umka && vmGetHostMapEntryKey(&umka->vm, entry, &result);
+    if (key)
+        *key = result.apiSlot;
+    return ok;
+}
+
+
+UMKA_API bool umkaGetHostMapEntryValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *value)
+{
+    Slot result = {0};
+    bool ok = umka && vmGetHostMapEntryValue(&umka->vm, entry, &result);
+    if (value)
+        *value = result.apiSlot;
+    return ok;
+}
+
+
+UMKA_API bool umkaGetHostMapEntryStringKey(Umka *umka, const UmkaHostMapEntry *entry, const char **key)
+{
+    return umka && vmGetHostMapEntryStringKey(&umka->vm, entry, key);
+}
+
+
+UMKA_API bool umkaGetHostMapEntryAnyValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaAny *value)
+{
+    return umka && vmGetHostMapEntryAnyValue(&umka->vm, entry, value);
+}
+
+
+UMKA_API bool umkaRetainHostMapEntryKey(Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle)
+{
+    return umka && vmRetainHostMapEntryKey(&umka->vm, entry, handle);
+}
+
+
+UMKA_API bool umkaRetainHostMapEntryValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle)
+{
+    return umka && vmRetainHostMapEntryValue(&umka->vm, entry, handle);
+}
+
+
 UMKA_API char *umkaMakeStr(Umka *umka, const char *str)
 {
     return vmMakeStr(&umka->vm, str);

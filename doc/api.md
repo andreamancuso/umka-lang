@@ -683,6 +683,17 @@ typedef struct
 ```
 Host-owned handle for retaining an Umka heap value across native calls. Initialize it by calling `umkaMakeHostHandle`, retain a value or heap data pointer with `umkaRetainHostValue` or `umkaRetainHostData`, and release it with `umkaClearHostHandle` or `umkaReleaseHostHandle`.
 
+```
+typedef struct
+{
+    const UmkaHostHandle *mapHandle;
+    int64_t index;
+    const UmkaType *keyType;
+    const UmkaType *itemType;
+} UmkaHostMapEntry;
+```
+Read-only descriptor for an entry in a retained map host handle. It identifies an entry by map handle, index, key type, and item type. It does not own map storage and does not expose map node internals.
+
 ### Functions
 
 ```
@@ -1178,7 +1189,7 @@ Returned value: `true` if the value has been retained, otherwise `false`.
 Notes:
 
 * Supported root value types are direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
-* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly retained fields/items
+* Fixed arrays, structures, dynamic arrays, and maps may contain ordinal, real, `str`, dynamic array, map, fixed array, structure, interface, and closure fields/items when the actual retained values are supported. Pointers, weak pointers, fibers, unsupported nested interfaces, and unsupported closure upvalues are rejected
 * Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, and supported closure values are supported
 * Non-empty interface method-table fields are preserved in the copied interface cell
 * Dynamic values whose concrete self is a pointer, weak pointer, nested interface, or fiber are rejected by retention, although `umkaGetAnyValue` can still inspect them
@@ -1237,6 +1248,98 @@ Returns the retained value type, or `NULL` for empty handles and handles created
 UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle);
 ```
 Returns the retained value. For structured values, `ptrVal` points to stable handle-owned value storage until the handle is cleared. For retained `any` and interface values, `ptrVal` points to the copied interface cell; use `umkaGetAnyValue((UmkaAny *)slot.ptrVal, ...)` to inspect the concrete value. When passing a retained non-empty interface value back to Umka, copy `umkaGetTypeSize(umkaGetHostHandleType(handle))` bytes from `slot.ptrVal` into the destination interface storage. For empty handles, the returned slot is zeroed.
+
+```
+UMKA_API bool umkaGetHostMapCount(Umka *umka, const UmkaHostHandle *mapHandle, int64_t *count);
+```
+Returns the number of entries in a retained map.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `mapHandle`: Retained host handle whose value type is a map
+* `count`: Output entry count
+
+Returned value: `true` if the count has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaGetHostMapEntry(Umka *umka, const UmkaHostHandle *mapHandle, int64_t index, UmkaHostMapEntry *entry);
+```
+Returns a read-only entry descriptor for a retained map entry.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `mapHandle`: Retained host handle whose value type is a map
+* `index`: Zero-based entry index
+* `entry`: Output entry descriptor
+
+Returned value: `true` if the entry descriptor has been filled, otherwise `false`.
+
+```
+UMKA_API bool umkaGetHostMapEntryKey(Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *key);
+UMKA_API bool umkaGetHostMapEntryValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *value);
+```
+Returns a snapshot of an entry key or value slot.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `entry`: Entry descriptor returned by `umkaGetHostMapEntry`
+* `key`, `value`: Output stack slot
+
+Returned value: `true` if the slot has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaGetHostMapEntryStringKey(Umka *umka, const UmkaHostMapEntry *entry, const char **key);
+```
+Returns a retained map entry key as a string pointer.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `entry`: Entry descriptor returned by `umkaGetHostMapEntry`
+* `key`: Output string pointer
+
+Returned value: `true` if the entry key type is `str` and the key has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaGetHostMapEntryAnyValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaAny *value);
+```
+Returns a retained map entry value as an `any` interface cell.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `entry`: Entry descriptor returned by `umkaGetHostMapEntry`
+* `value`: Output `any` value
+
+Returned value: `true` if the entry item type is the built-in `any` shape and the value has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaRetainHostMapEntryKey(Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
+UMKA_API bool umkaRetainHostMapEntryValue(Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
+```
+Retains a map entry key or value in a host handle.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `entry`: Entry descriptor returned by `umkaGetHostMapEntry`
+* `handle`: Initialized host handle that receives the retained key or value
+
+Returned value: `true` if the key or value has been retained, otherwise `false`.
+
+Notes:
+
+* These APIs require a retained `UmkaHostHandle` whose value type is a map. They reject `NULL` runtimes, `NULL` outputs, empty handles, handles from another interpreter, non-map handles, and invalid entry indices
+* `UmkaHostMapEntry` is a descriptor, not an owning handle. It is valid only while the owning interpreter and retained map handle remain alive and the map is not mutated
+* Entry descriptors re-resolve the entry by index and type metadata. They do not expose `Map`, `MapNode`, heap page, stack, or private `Type` layout
+* `umkaGetHostMapEntryStringKey` is intended for direct `str` keys. Other key kinds return `false`
+* `umkaGetHostMapEntryAnyValue` is intended for built-in `any` map item values. Other value kinds return `false`
+* `umkaRetainHostMapEntryKey` and `umkaRetainHostMapEntryValue` use the same support and ownership rules as `umkaRetainHostValue`
+* String pointers and structured pointers returned through snapshot slots are borrowed from retained map storage. Retain the entry key or value in a separate host handle if it must outlive the map handle
+* Unsupported cases include map mutation through these APIs, host-created arbitrary `map[str]any` construction, arbitrary reference-bearing map keys, fiber payload retention, and borrowed map entry pointers
 
 ## Accessing Umka API dynamically
 

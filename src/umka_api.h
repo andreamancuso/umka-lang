@@ -162,6 +162,15 @@ typedef struct
 
 typedef struct
 {
+    const UmkaHostHandle *mapHandle;
+    int64_t index;
+    const UmkaType *keyType;
+    const UmkaType *itemType;
+} UmkaHostMapEntry;
+
+
+typedef struct
+{
     const char *fileName;
     const char *fnName;
     int line, pos, code;
@@ -260,6 +269,14 @@ typedef void (*UmkaReleaseHostHandle)           (UmkaHostHandle *handle);
 typedef bool (*UmkaHostHandleValid)             (const UmkaHostHandle *handle);
 typedef const UmkaType *(*UmkaGetHostHandleType)(const UmkaHostHandle *handle);
 typedef UmkaStackSlot (*UmkaGetHostHandleValue) (const UmkaHostHandle *handle);
+typedef bool (*UmkaGetHostMapCount)             (Umka *umka, const UmkaHostHandle *mapHandle, int64_t *count);
+typedef bool (*UmkaGetHostMapEntry)             (Umka *umka, const UmkaHostHandle *mapHandle, int64_t index, UmkaHostMapEntry *entry);
+typedef bool (*UmkaGetHostMapEntryKey)          (Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *key);
+typedef bool (*UmkaGetHostMapEntryValue)        (Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *value);
+typedef bool (*UmkaGetHostMapEntryStringKey)    (Umka *umka, const UmkaHostMapEntry *entry, const char **key);
+typedef bool (*UmkaGetHostMapEntryAnyValue)     (Umka *umka, const UmkaHostMapEntry *entry, UmkaAny *value);
+typedef bool (*UmkaRetainHostMapEntryKey)       (Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
+typedef bool (*UmkaRetainHostMapEntryValue)     (Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
 
 
 typedef struct
@@ -312,6 +329,14 @@ typedef struct
     UmkaHostHandleValid umkaHostHandleValid;
     UmkaGetHostHandleType umkaGetHostHandleType;
     UmkaGetHostHandleValue umkaGetHostHandleValue;
+    UmkaGetHostMapCount umkaGetHostMapCount;
+    UmkaGetHostMapEntry umkaGetHostMapEntry;
+    UmkaGetHostMapEntryKey umkaGetHostMapEntryKey;
+    UmkaGetHostMapEntryValue umkaGetHostMapEntryValue;
+    UmkaGetHostMapEntryStringKey umkaGetHostMapEntryStringKey;
+    UmkaGetHostMapEntryAnyValue umkaGetHostMapEntryAnyValue;
+    UmkaRetainHostMapEntryKey umkaRetainHostMapEntryKey;
+    UmkaRetainHostMapEntryValue umkaRetainHostMapEntryValue;
     UmkaRequestInterrupt umkaRequestInterrupt;
     UmkaClearInterrupt umkaClearInterrupt;
     UmkaInterruptRequested umkaInterruptRequested;
@@ -429,6 +454,14 @@ UMKA_API void umkaReleaseHostHandle         (UmkaHostHandle *handle);
 UMKA_API bool umkaHostHandleValid           (const UmkaHostHandle *handle);
 UMKA_API const UmkaType *umkaGetHostHandleType(const UmkaHostHandle *handle);
 UMKA_API UmkaStackSlot umkaGetHostHandleValue(const UmkaHostHandle *handle);
+UMKA_API bool umkaGetHostMapCount           (Umka *umka, const UmkaHostHandle *mapHandle, int64_t *count);
+UMKA_API bool umkaGetHostMapEntry           (Umka *umka, const UmkaHostHandle *mapHandle, int64_t index, UmkaHostMapEntry *entry);
+UMKA_API bool umkaGetHostMapEntryKey        (Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *key);
+UMKA_API bool umkaGetHostMapEntryValue      (Umka *umka, const UmkaHostMapEntry *entry, UmkaStackSlot *value);
+UMKA_API bool umkaGetHostMapEntryStringKey  (Umka *umka, const UmkaHostMapEntry *entry, const char **key);
+UMKA_API bool umkaGetHostMapEntryAnyValue   (Umka *umka, const UmkaHostMapEntry *entry, UmkaAny *value);
+UMKA_API bool umkaRetainHostMapEntryKey     (Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
+UMKA_API bool umkaRetainHostMapEntryValue   (Umka *umka, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
 
 
 static inline UmkaAPI *umkaGetAPI(Umka *umka)
