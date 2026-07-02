@@ -40,6 +40,10 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaGetStrLen         = umkaGetStrLen;
     umka->api.umkaMakeDynArray      = umkaMakeDynArray;
     umka->api.umkaGetDynArrayLen    = umkaGetDynArrayLen;
+    umka->api.umkaSetDynArrayItem   = umkaSetDynArrayItem;
+    umka->api.umkaGetDynArrayItem   = umkaGetDynArrayItem;
+    umka->api.umkaGetDynArrayAnyItem = umkaGetDynArrayAnyItem;
+    umka->api.umkaRetainHostDynArrayItem = umkaRetainHostDynArrayItem;
     umka->api.umkaGetVersion        = umkaGetVersion;
     umka->api.umkaGetMemUsage       = umkaGetMemUsage;
     umka->api.umkaMakeFuncContext   = umkaMakeFuncContext;

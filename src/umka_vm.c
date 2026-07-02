@@ -1415,7 +1415,8 @@ static void doRefCntImpl(HeapPages *pages, void *ptr, const Type *type, TokenKin
 }
 
 
-static bool doHostHandleClosureValueSupported(const Closure *closure);
+static bool doHostHandleInterfaceValueSupported(const Interface *interface, int depth, Error *error);
+static bool doHostHandleClosureValueSupported(const Closure *closure, int depth, Error *error);
 static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int depth, Error *error);
 
 
@@ -1509,9 +1510,9 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
 }
 
 
-static bool doHostHandleInterfaceValueSupported(const Interface *interface)
+static bool doHostHandleInterfaceValueSupported(const Interface *interface, int depth, Error *error)
 {
-    if (!interface)
+    if (!interface || depth <= 0)
         return false;
 
     if (!interface->self)
@@ -1525,17 +1526,22 @@ static bool doHostHandleInterfaceValueSupported(const Interface *interface)
         return *(int64_t *)interface->self > 0;
 
     if (base->kind == TYPE_CLOSURE)
-        return doHostHandleClosureValueSupported((const Closure *)interface->self);
+        return doHostHandleClosureValueSupported((const Closure *)interface->self, depth - 1, error);
 
-    return doHostHandleContainedTypeSupported(base, 32);
+    if (base->kind == TYPE_PTR || base->kind == TYPE_WEAKPTR || base->kind == TYPE_INTERFACE || base->kind == TYPE_FIBER)
+        return false;
+
+    Slot self = {.ptrVal = interface->self};
+    return doHostHandleRetainValueSupported(base, self, depth - 1, error);
 }
 
 
-static bool doHostHandleClosureValueSupported(const Closure *closure)
+static bool doHostHandleClosureValueSupported(const Closure *closure, int depth, Error *error)
 {
     return closure &&
+           depth > 0 &&
            closure->entryOffset > 0 &&
-           doHostHandleInterfaceValueSupported(&closure->upvalue);
+           doHostHandleInterfaceValueSupported(&closure->upvalue, depth - 1, error);
 }
 
 
@@ -1556,6 +1562,11 @@ static bool doHostAssignableTypeSupported(const Type *type)
                     typeMapItem(type)->numItems == 2);
 
         case TYPE_DYNARRAY:
+            return doHostHandleContainedTypeSupported(type, 32) ||
+                   (type->base &&
+                    type->base->kind == TYPE_INTERFACE &&
+                    type->base->numItems == 2);
+
         case TYPE_ARRAY:
         case TYPE_STRUCT:
             return doHostHandleContainedTypeSupported(type, 32);
@@ -1608,10 +1619,10 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
         return value.intVal > 0;
 
     if (type->kind == TYPE_CLOSURE)
-        return doHostHandleClosureValueSupported((const Closure *)value.ptrVal);
+        return doHostHandleClosureValueSupported((const Closure *)value.ptrVal, 32, pages->error);
 
     if (type->kind == TYPE_INTERFACE)
-        return value.ptrVal && doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal);
+        return value.ptrVal && doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal, 32, pages->error);
 
     if (typeStructured(type))
     {
@@ -1621,7 +1632,8 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
         if (type->kind == TYPE_DYNARRAY)
         {
             const DynArray *array = (const DynArray *)value.ptrVal;
-            return array->type && typeEquivalent(array->type, type) && array->data;
+            return array->type && typeEquivalent(array->type, type) && array->data &&
+                   doHostHandleRetainValueSupported(type, value, 32, pages->error);
         }
 
         if (type->kind == TYPE_MAP)
@@ -2082,10 +2094,10 @@ static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int d
             return true;
 
         case TYPE_INTERFACE:
-            return doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal);
+            return doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal, depth, error);
 
         case TYPE_CLOSURE:
-            return doHostHandleClosureValueSupported((const Closure *)value.ptrVal);
+            return doHostHandleClosureValueSupported((const Closure *)value.ptrVal, depth, error);
 
         default:
             return false;
@@ -5349,7 +5361,7 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
     if (type->kind == TYPE_INTERFACE)
     {
         const Interface *src = (const Interface *)value.ptrVal;
-        if (!doHostHandleInterfaceValueSupported(src))
+        if (!doHostHandleInterfaceValueSupported(src, 32, vm->error))
             return false;
 
         const Type *base = src->self && src->selfType && src->selfType->kind == TYPE_PTR ? src->selfType->base : NULL;
@@ -5394,7 +5406,7 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
     if (type->kind == TYPE_FN && value.intVal <= 0)
         return false;
 
-    if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported((const Closure *)value.ptrVal))
+    if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported((const Closure *)value.ptrVal, 32, vm->error))
         return false;
 
     if (!doHostHandleRetainValueSupported(type, value, 32, vm->error))
@@ -5480,6 +5492,86 @@ void vmMakeDynArray(VM *vm, DynArray *array, const Type *type, int len)
 
     doRefCntImpl(&vm->pages, array, type, TOK_MINUSMINUS);
     doAllocDynArray(&vm->pages, array, type, len, vm->error);
+}
+
+
+static bool doGetHostDynArrayItem(const DynArray *array, int64_t index, const Type **itemType, void **item)
+{
+    if (itemType)
+        *itemType = NULL;
+    if (item)
+        *item = NULL;
+
+    if (!array || !array->type || array->type->kind != TYPE_DYNARRAY || !array->data || array->itemSize <= 0)
+        return false;
+
+    const Type *type = array->type;
+    const Type *base = type->base;
+    if (!base || array->itemSize != base->size)
+        return false;
+
+    const int64_t len = getDims(array)->len;
+    if (index < 0 || index >= len)
+        return false;
+
+    if (itemType)
+        *itemType = base;
+    if (item)
+        *item = (char *)array->data + index * array->itemSize;
+    return true;
+}
+
+
+bool vmSetDynArrayItem(VM *vm, DynArray *array, int64_t index, Slot item)
+{
+    const Type *itemType = NULL;
+    void *dest = NULL;
+    if (!vm || !doGetHostDynArrayItem(array, index, &itemType, &dest))
+        return false;
+
+    return vmAssignHostValue(vm, dest, itemType, item);
+}
+
+
+bool vmGetDynArrayItem(VM *vm, const DynArray *array, int64_t index, Slot *item)
+{
+    if (item)
+        memset(item, 0, sizeof(*item));
+
+    const Type *itemType = NULL;
+    void *src = NULL;
+    if (!vm || !item || !doGetHostDynArrayItem(array, index, &itemType, &src))
+        return false;
+
+    item->ptrVal = src;
+    doDerefImpl(item, itemType->kind, vm->error);
+    return true;
+}
+
+
+bool vmGetDynArrayAnyItem(VM *vm, const DynArray *array, int64_t index, UmkaAny *item, const Type *anyType)
+{
+    if (item)
+        memset(item, 0, sizeof(*item));
+
+    const Type *itemType = NULL;
+    void *src = NULL;
+    if (!vm || !item || !anyType || !doGetHostDynArrayItem(array, index, &itemType, &src) || itemType != anyType)
+        return false;
+
+    *item = *(const UmkaAny *)src;
+    return true;
+}
+
+
+bool vmRetainHostDynArrayItem(VM *vm, const DynArray *array, int64_t index, UmkaHostHandle *handle)
+{
+    const Type *itemType = NULL;
+    Slot item = {0};
+    return vm && handle &&
+           doGetHostDynArrayItem(array, index, &itemType, NULL) &&
+           vmGetDynArrayItem(vm, array, index, &item) &&
+           vmRetainHostValue(vm, handle, itemType, item);
 }
 
 

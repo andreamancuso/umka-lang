@@ -62,6 +62,12 @@ Ninth fork slice status: `umkaMakeMap` and `umkaSetMapItem` now support host-cre
 
 Supported `map[str]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps, and closures whose captured upvalue cell is supported. Fiber payloads, direct pointers, weak pointers, unsupported nested interfaces, unsupported closure upvalues, arbitrary reference-bearing keys, and borrowed map entry pointers remain rejected.
 
+Tenth fork slice status: `umkaSetDynArrayItem`, `umkaGetDynArrayItem`, `umkaGetDynArrayAnyItem`, and `umkaRetainHostDynArrayItem` provide fixed-length dynamic-array item construction and inspection without exposing `DynArray` internals beyond the existing public `UmkaDynArray(T)` storage shape. Hosts can create `[]any` with `umkaMakeDynArray`, fill each cell with an `UmkaAny` produced by `umkaMakeAny`, pass the array to Umka with `umkaAssignHostValue`, return it from native callbacks, retain it with `UmkaHostHandle`, inspect item cells, replace items safely, and release host-owned storage with `umkaReleaseHostValue`.
+
+Supported `[]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps including `map[str]any`, and closures whose captured upvalue cell is supported. The APIs also support direct item get/set for existing safe dynamic-array item shapes such as `[]int`.
+
+Remaining dynamic-array work: resizing, append, insert, delete, capacity management, arbitrary managed heap wrappers, mutation/versioning rules for borrowed item pointers, fiber payloads, direct pointers, weak pointers, unsupported nested interfaces, and unsupported closure upvalues.
+
 ## 5. UmkaSharp Integration
 
 Extend `umka_shim`, managed wrappers, tests, documentation, and BTBrowser adapter code to consume the new C APIs. Each native addition should have managed capability checks, error behavior, lifetime tests, and package-surface tests before becoming part of the public UmkaSharp API.

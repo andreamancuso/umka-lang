@@ -997,6 +997,72 @@ Parameters:
 Returned value: Dynamic array length
 
 ```
+UMKA_API bool umkaSetDynArrayItem(Umka *umka, void *array, int64_t index, UmkaStackSlot item);
+```
+Assigns a dynamic array item using Umka reference-counting rules.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `array`: Dynamic array previously initialized by `umkaMakeDynArray`, returned by Umka, or retained in host storage
+* `index`: Zero-based item index
+* `item`: Source item value. For `str`, store the string pointer in `ptrVal`; for dynamic arrays, maps, fixed arrays, structures, `any`, interfaces, and closures, store a pointer to source value storage in `ptrVal`
+
+Returned value: `true` if the item has been assigned, otherwise `false`.
+
+```
+UMKA_API bool umkaGetDynArrayItem(Umka *umka, const void *array, int64_t index, UmkaStackSlot *item);
+```
+Reads a dynamic array item into a stack slot.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `array`: Dynamic array storage
+* `index`: Zero-based item index
+* `item`: Output stack slot
+
+Returned value: `true` if the item has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaGetDynArrayAnyItem(Umka *umka, const void *array, int64_t index, UmkaAny *item);
+```
+Reads an item from a built-in `[]any` dynamic array.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `array`: Dynamic array storage whose item type is built-in `any`
+* `index`: Zero-based item index
+* `item`: Output `UmkaAny` cell
+
+Returned value: `true` if the `any` item has been read, otherwise `false`.
+
+```
+UMKA_API bool umkaRetainHostDynArrayItem(Umka *umka, const void *array, int64_t index, UmkaHostHandle *handle);
+```
+Retains a supported dynamic array item in a host handle.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `array`: Dynamic array storage
+* `index`: Zero-based item index
+* `handle`: Initialized host handle that receives the retained item
+
+Returned value: `true` if the item has been retained, otherwise `false`.
+
+Notes:
+
+* These APIs operate on the current fixed length of a dynamic array. They do not resize, append, insert, delete, or expose capacity
+* `umkaSetDynArrayItem` increments references held by the new item, decrements references held by the old item, then copies the new item bytes
+* `[]any` construction is supported by creating each concrete value with `umkaMakeAny`, passing a pointer to that `UmkaAny` in `item.ptrVal`, and releasing the temporary `UmkaAny` with `umkaReleaseHostValue` when it is not consumed elsewhere
+* Supported `[]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps including `map[str]any`, and closures whose captured upvalue cell is supported
+* `umkaGetDynArrayItem` returns borrowed pointers for reference-bearing or structured values. Retain the item with `umkaRetainHostDynArrayItem` if it must outlive the array storage from which it was read
+* `false` is returned for `NULL` arguments, uninitialized arrays, non-dynamic-array storage, invalid indices, wrong item types, unsupported payloads, or `umkaGetDynArrayAnyItem` used on a non-`[]any` array
+* Unsupported cases include dynamic-array resizing, append, insert, delete, fiber payloads, pointers, weak pointers, unsupported nested interfaces or closure upvalues, and arbitrary managed heap wrappers
+
+```
 UMKA_API void *umkaMakeStruct(Umka *umka, const UmkaType *type);
 ```
 Creates a structure or array in heap memory.
@@ -1083,7 +1149,7 @@ Notes:
 
 * The assignment increments references held by the new value, decrements references held by the old destination value, then copies the new value bytes
 * Supported types are ordinal and real values, `bool`, `char`, direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
-* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items. `map[str]any` values are accepted when every inserted `any` payload is supported by `umkaMakeAny`
+* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items. `map[str]any` and `[]any` values are accepted when every inserted `any` payload is supported by `umkaMakeAny`
 * Dynamic values whose concrete self is an ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, or supported closure are accepted. Pointer, weak pointer, nested interface, and fiber concrete values are rejected
 * Direct `str` values must be `NULL` or Umka strings created by `umkaMakeStr`
 * If `dest` is a parameter slot in an `UmkaFuncContext`, a successful `umkaCall` consumes that assigned parameter reference through normal function cleanup. Do not call `umkaReleaseHostValue` on that same parameter slot after the call returns. For host-owned storage that is not consumed by an Umka call, release it explicitly

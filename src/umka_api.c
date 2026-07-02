@@ -412,6 +412,37 @@ UMKA_API int umkaGetDynArrayLen(const void *array)
 }
 
 
+UMKA_API bool umkaSetDynArrayItem(Umka *umka, void *array, int64_t index, UmkaStackSlot item)
+{
+    const Slot *itemPtr = (Slot *)&item;
+    return umka && vmSetDynArrayItem(&umka->vm, (DynArray *)array, index, *itemPtr);
+}
+
+
+UMKA_API bool umkaGetDynArrayItem(Umka *umka, const void *array, int64_t index, UmkaStackSlot *item)
+{
+    if (!umka || !item)
+        return false;
+
+    Slot result = {0};
+    bool ok = vmGetDynArrayItem(&umka->vm, (const DynArray *)array, index, &result);
+    *item = result.apiSlot;
+    return ok;
+}
+
+
+UMKA_API bool umkaGetDynArrayAnyItem(Umka *umka, const void *array, int64_t index, UmkaAny *item)
+{
+    return umka && vmGetDynArrayAnyItem(&umka->vm, (const DynArray *)array, index, item, umka->types.predecl.anyType);
+}
+
+
+UMKA_API bool umkaRetainHostDynArrayItem(Umka *umka, const void *array, int64_t index, UmkaHostHandle *handle)
+{
+    return umka && vmRetainHostDynArrayItem(&umka->vm, (const DynArray *)array, index, handle);
+}
+
+
 UMKA_API const char *umkaGetVersion(void)
 {
     if (sizeof(void *) == 8)
