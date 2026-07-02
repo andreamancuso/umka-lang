@@ -196,11 +196,13 @@ typedef struct tagFiber
 typedef struct tagVM
 {
     Fiber *fiber, *mainFiber;
+    Fiber *hostResumeFiber, *hostResumeParent, *hostResumeCurrent;
     HeapPages pages;
     UmkaHookFunc hooks[UMKA_NUM_HOOKS];
     volatile int interruptRequested;
     char interruptMsg[DEFAULT_STR_LEN + 1];
     bool terminatedNormally;
+    bool hostResumeActive;
     Storage *storage;
     Error *error;
 } VM;
@@ -246,6 +248,9 @@ bool vmRetainHostMapEntryValue  (VM *vm, const UmkaHostMapEntry *entry, UmkaHost
 bool vmFiberValid               (VM *vm, Slot fiber);
 bool vmFiberAlive               (VM *vm, Slot fiber);
 bool vmFiberRunning             (VM *vm, Slot fiber);
+UmkaFiberResumeStatus vmResumeHostFiber(VM *vm, const UmkaHostHandle *handle);
+UmkaFiberResumeStatus vmResumeHostFiberValue(VM *vm, Slot fiber);
+void vmFinishHostFiberResume    (VM *vm);
 bool vmGetAnySelf               (const UmkaAny *value, const Type **selfType, void **self);
 bool vmGetAnyValue              (const UmkaAny *value, const Type **type, Slot *slot);
 bool vmAssignHostValue          (VM *vm, void *dest, const Type *type, Slot value);

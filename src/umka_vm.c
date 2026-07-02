@@ -944,6 +944,10 @@ void vmInit(VM *vm, Storage *storage, int stackSize, bool fileSystemEnabled, Err
     vm->interruptRequested = 0;
     vm->interruptMsg[0] = 0;
     vm->terminatedNormally = false;
+    vm->hostResumeFiber = NULL;
+    vm->hostResumeParent = NULL;
+    vm->hostResumeCurrent = NULL;
+    vm->hostResumeActive = false;
     vm->error = error;
 
     srand(1);
@@ -4697,6 +4701,9 @@ static void vmLoop(VM *vm)
                 if (newFiber)
                     fiber = vm->fiber = vm->pages.fiber = newFiber;
 
+                if (!fiber->alive || fiber->ip == RETURN_FROM_VM)
+                    return;
+
                 break;
             }
             case OP_RETURN:
@@ -5249,6 +5256,73 @@ bool vmFiberRunning(VM *vm, Slot fiber)
 {
     const Fiber *resolved = (const Fiber *)fiber.ptrVal;
     return vmFiberValid(vm, fiber) && resolved == vm->fiber;
+}
+
+
+void vmFinishHostFiberResume(VM *vm)
+{
+    if (!vm || !vm->hostResumeActive)
+        return;
+
+    if (vm->hostResumeFiber)
+        vm->hostResumeFiber->parent = vm->hostResumeParent;
+
+    if (vm->hostResumeCurrent)
+        vm->fiber = vm->pages.fiber = vm->hostResumeCurrent;
+
+    vm->hostResumeFiber = NULL;
+    vm->hostResumeParent = NULL;
+    vm->hostResumeCurrent = NULL;
+    vm->hostResumeActive = false;
+}
+
+
+UmkaFiberResumeStatus vmResumeHostFiberValue(VM *vm, Slot fiber)
+{
+    if (!vm || vm->hostResumeActive || !vmAlive(vm))
+        return UMKA_FIBER_RESUME_INVALID;
+
+    Fiber *child = (Fiber *)fiber.ptrVal;
+    if (!doHostFiberValueValid(&vm->pages, child))
+        return UMKA_FIBER_RESUME_INVALID;
+
+    if (!child->alive)
+        return UMKA_FIBER_RESUME_DONE;
+
+    Fiber *host = vm->fiber;
+    if (!host || !host->alive || host->ip != RETURN_FROM_VM || child == host || child->parent != host)
+        return UMKA_FIBER_RESUME_INVALID;
+
+    Fiber hostBoundary = *host;
+    hostBoundary.parent = NULL;
+    hostBoundary.ip = RETURN_FROM_VM;
+    hostBoundary.top = hostBoundary.base = hostBoundary.stack + hostBoundary.stackSize - 1;
+    hostBoundary.alive = true;
+    hostBoundary.vm = vm;
+
+    vm->hostResumeFiber = child;
+    vm->hostResumeParent = child->parent;
+    vm->hostResumeCurrent = host;
+    vm->hostResumeActive = true;
+
+    child->parent = &hostBoundary;
+    vm->fiber = vm->pages.fiber = child;
+
+    vmLoop(vm);
+
+    const bool alive = child->alive;
+    vmFinishHostFiberResume(vm);
+    return alive ? UMKA_FIBER_RESUME_YIELDED : UMKA_FIBER_RESUME_DONE;
+}
+
+
+UmkaFiberResumeStatus vmResumeHostFiber(VM *vm, const UmkaHostHandle *handle)
+{
+    if (!vm || !vmHostHandleValid(handle) || handle->runtime != vm ||
+        handle->kind != UMKA_HOST_HANDLE_VALUE || !handle->type || handle->type->kind != TYPE_FIBER)
+        return UMKA_FIBER_RESUME_INVALID;
+
+    return vmResumeHostFiberValue(vm, vmGetHostHandleValue(handle));
 }
 
 

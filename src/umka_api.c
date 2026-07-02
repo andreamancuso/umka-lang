@@ -306,6 +306,43 @@ UMKA_API bool umkaRetainHostFiber(Umka *umka, UmkaHostHandle *handle, UmkaStackS
 }
 
 
+static UmkaFiberResumeStatus apiResumeFiber(Umka *umka, UmkaHostHandle *handle, const Slot *fiber, bool useHandle)
+{
+    if (!umka || (useHandle && !handle) || (!useHandle && !fiber))
+        return UMKA_FIBER_RESUME_INVALID;
+
+    // Nested calls must not replace the active top-level jumper.
+    jmp_buf dummyJumper;
+    jmp_buf *jumper = umka->error.jumperNesting == 0 ? &umka->error.jumper : &dummyJumper;
+
+    if (setjmp(*jumper) == 0)
+    {
+        umka->error.jumperNesting++;
+        UmkaFiberResumeStatus status = useHandle ? vmResumeHostFiber(&umka->vm, handle) : vmResumeHostFiberValue(&umka->vm, *fiber);
+        umka->error.jumperNesting--;
+        return status;
+    }
+
+    vmFinishHostFiberResume(&umka->vm);
+    if (umka->error.jumperNesting > 0)
+        umka->error.jumperNesting--;
+    return UMKA_FIBER_RESUME_ERROR;
+}
+
+
+UMKA_API UmkaFiberResumeStatus umkaResumeFiber(Umka *umka, UmkaHostHandle *handle)
+{
+    return apiResumeFiber(umka, handle, NULL, true);
+}
+
+
+UMKA_API UmkaFiberResumeStatus umkaResumeFiberValue(Umka *umka, UmkaStackSlot fiber)
+{
+    const Slot *fiberPtr = (Slot *)&fiber;
+    return apiResumeFiber(umka, NULL, fiberPtr, false);
+}
+
+
 UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr)
 {
     return vmRetainHostData(&umka->vm, handle, ptr);

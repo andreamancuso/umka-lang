@@ -160,6 +160,15 @@ typedef struct
 } UmkaHostHandle;
 
 
+typedef enum
+{
+    UMKA_FIBER_RESUME_INVALID,
+    UMKA_FIBER_RESUME_YIELDED,
+    UMKA_FIBER_RESUME_DONE,
+    UMKA_FIBER_RESUME_ERROR
+} UmkaFiberResumeStatus;
+
+
 typedef struct
 {
     const UmkaHostHandle *mapHandle;
@@ -271,6 +280,8 @@ typedef bool (*UmkaFiberValid)                  (Umka *umka, UmkaStackSlot fiber
 typedef bool (*UmkaFiberAlive)                  (Umka *umka, UmkaStackSlot fiber);
 typedef bool (*UmkaFiberRunning)                (Umka *umka, UmkaStackSlot fiber);
 typedef bool (*UmkaRetainHostFiber)             (Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber);
+typedef UmkaFiberResumeStatus (*UmkaResumeFiber)(Umka *umka, UmkaHostHandle *handle);
+typedef UmkaFiberResumeStatus (*UmkaResumeFiberValue)(Umka *umka, UmkaStackSlot fiber);
 typedef bool (*UmkaRetainHostData)              (Umka *umka, UmkaHostHandle *handle, void *ptr);
 typedef void (*UmkaClearHostHandle)             (UmkaHostHandle *handle);
 typedef void (*UmkaReleaseHostHandle)           (UmkaHostHandle *handle);
@@ -339,6 +350,8 @@ typedef struct
     UmkaFiberAlive      umkaFiberAlive;
     UmkaFiberRunning    umkaFiberRunning;
     UmkaRetainHostFiber umkaRetainHostFiber;
+    UmkaResumeFiber     umkaResumeFiber;
+    UmkaResumeFiberValue umkaResumeFiberValue;
     UmkaRetainHostData  umkaRetainHostData;
     UmkaClearHostHandle umkaClearHostHandle;
     UmkaReleaseHostHandle umkaReleaseHostHandle;
@@ -472,6 +485,8 @@ UMKA_API bool umkaFiberValid                (Umka *umka, UmkaStackSlot fiber);
 UMKA_API bool umkaFiberAlive                (Umka *umka, UmkaStackSlot fiber);
 UMKA_API bool umkaFiberRunning              (Umka *umka, UmkaStackSlot fiber);
 UMKA_API bool umkaRetainHostFiber           (Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber);
+UMKA_API UmkaFiberResumeStatus umkaResumeFiber(Umka *umka, UmkaHostHandle *handle);
+UMKA_API UmkaFiberResumeStatus umkaResumeFiberValue(Umka *umka, UmkaStackSlot fiber);
 UMKA_API bool umkaRetainHostData            (Umka *umka, UmkaHostHandle *handle, void *ptr);
 UMKA_API void umkaClearHostHandle           (UmkaHostHandle *handle);
 UMKA_API void umkaReleaseHostHandle         (UmkaHostHandle *handle);

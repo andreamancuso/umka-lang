@@ -68,6 +68,8 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaFiberAlive        = umkaFiberAlive;
     umka->api.umkaFiberRunning      = umkaFiberRunning;
     umka->api.umkaRetainHostFiber   = umkaRetainHostFiber;
+    umka->api.umkaResumeFiber       = umkaResumeFiber;
+    umka->api.umkaResumeFiberValue  = umkaResumeFiberValue;
     umka->api.umkaRetainHostData    = umkaRetainHostData;
     umka->api.umkaClearHostHandle   = umkaClearHostHandle;
     umka->api.umkaReleaseHostHandle = umkaReleaseHostHandle;

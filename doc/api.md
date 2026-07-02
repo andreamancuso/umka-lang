@@ -1307,8 +1307,44 @@ Notes:
 * This is a convenience wrapper around `umkaRetainHostValue` with the built-in fiber type
 * Fibers can also be retained when they are the concrete value inside `any`, `map[str]any`, or `[]any`, provided the fiber belongs to the same interpreter
 * Host-created fibers are not exposed. Hosts can obtain fibers only from Umka code, callback arguments, results, or retained containers
-* Host-side resume is not exposed by this API. Resume retained fibers by passing them back to Umka code that calls `resume`
-* The current VM scheduler resumes by switching `vm->fiber` to the child or parent fiber. A host resume API would need an explicit host-boundary stop when a child yields back to a parent that is no longer suspended inside an Umka `resume` call
+
+```
+typedef enum
+{
+    UMKA_FIBER_RESUME_INVALID,
+    UMKA_FIBER_RESUME_YIELDED,
+    UMKA_FIBER_RESUME_DONE,
+    UMKA_FIBER_RESUME_ERROR
+} UmkaFiberResumeStatus;
+
+UMKA_API UmkaFiberResumeStatus umkaResumeFiber(Umka *umka, UmkaHostHandle *handle);
+UMKA_API UmkaFiberResumeStatus umkaResumeFiberValue(Umka *umka, UmkaStackSlot fiber);
+```
+Resumes a same-runtime Umka-created fiber from the host.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `handle`: Retained host handle containing a fiber value
+* `fiber`: Direct fiber value in `ptrVal`
+
+Returned value:
+
+* `UMKA_FIBER_RESUME_YIELDED`: The fiber yielded back to the host by calling `resume()` with no child
+* `UMKA_FIBER_RESUME_DONE`: The fiber has completed or was already dead
+* `UMKA_FIBER_RESUME_ERROR`: The resumed fiber raised a runtime error or interruption. Use `umkaGetError` for details
+* `UMKA_FIBER_RESUME_INVALID`: The input or interpreter state is not resumable
+
+Notes:
+
+* `umkaResumeFiber` accepts only a non-empty same-runtime `UmkaHostHandle` whose retained value type is `fiber`
+* `umkaResumeFiberValue` accepts a direct same-runtime fiber slot while the value is still valid
+* The interpreter must be alive and idle at the normal host call boundary. Resume from native callbacks, hooks, or other reentrant VM execution is rejected
+* The target fiber must be a live child of the idle VM fiber. This avoids stealing a fiber from a suspended parent fiber
+* While resuming, the VM installs an internal host-boundary parent. A child `resume()` yields to the host and returns `UMKA_FIBER_RESUME_YIELDED`; child completion returns `UMKA_FIBER_RESUME_DONE`
+* Null runtimes, null handles, empty handles, non-fiber handles, null fibers, invalid or foreign fibers, current/running fibers, and non-child fibers return `UMKA_FIBER_RESUME_INVALID`
+* Runtime errors and interruptions follow the normal Umka error path and terminate the interpreter. `UMKA_FIBER_RESUME_ERROR` is returned only after the public API catches that error
+* Host-created fibers, cross-interpreter fiber transfer, cross-thread scheduling, and resuming arbitrary suspended fiber graphs are not exposed
 
 ```
 UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr);
@@ -1450,7 +1486,7 @@ Notes:
 * `umkaGetHostMapEntryAnyValue` is intended for built-in `any` map item values. Other value kinds return `false`
 * `umkaRetainHostMapEntryKey` and `umkaRetainHostMapEntryValue` use the same support and ownership rules as `umkaRetainHostValue`
 * String pointers and structured pointers returned through snapshot slots are borrowed from retained map storage. Retain the entry key or value in a separate host handle if it must outlive the map handle
-* Unsupported cases include map mutation through these APIs, arbitrary reference-bearing map keys, unsupported `any` payloads, borrowed map entry pointers, and host-side fiber resume
+* Unsupported cases include map mutation through these APIs, arbitrary reference-bearing map keys, unsupported `any` payloads, borrowed map entry pointers, and host-created fibers
 
 ## Accessing Umka API dynamically
 

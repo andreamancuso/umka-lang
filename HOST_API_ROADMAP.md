@@ -66,13 +66,15 @@ Tenth fork slice status: `umkaSetDynArrayItem`, `umkaGetDynArrayItem`, `umkaGetD
 
 Supported `[]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps including `map[str]any`, same-runtime Umka-created fibers, and closures whose captured upvalue cell is supported. The APIs also support direct item get/set for existing safe dynamic-array item shapes such as `[]int`.
 
-Remaining dynamic-array work: resizing, append, insert, delete, capacity management, arbitrary managed heap wrappers, mutation/versioning rules for borrowed item pointers, direct pointers, weak pointers, unsupported nested interfaces, unsupported closure upvalues, host-created fibers, and host-side fiber resume.
+Remaining dynamic-array work: resizing, append, insert, delete, capacity management, arbitrary managed heap wrappers, mutation/versioning rules for borrowed item pointers, direct pointers, weak pointers, unsupported nested interfaces, unsupported closure upvalues, and host-created fibers.
 
 Eleventh fork slice status: `umkaFiberValid`, `umkaFiberAlive`, `umkaFiberRunning`, and `umkaRetainHostFiber` provide public status and retention support for same-runtime Umka-created fiber values. The general retained host value path now also supports valid fiber values directly and as concrete payloads inside `any`, `map[str]any`, and `[]any`. Hosts can retain a fiber returned by Umka or received by a native callback, query whether it is valid/alive/currently running, pass it back to Umka as a `fiber` parameter, and release the handle safely after the fiber has completed.
 
-Host-side fiber creation is not exposed. Creating a fiber requires a closure, parent fiber selection, stack initialization, and upvalue ownership rules that are currently implemented only by Umka `make(fiber, ...)`.
+Twelfth fork slice status: `umkaResumeFiber` and `umkaResumeFiberValue` provide host-side resume for same-runtime Umka-created fibers. The implementation adds an internal host-boundary parent while a host resume is active, and `vmLoop` now stops cleanly if a resumed child yields back to that boundary through `resume()` or completes through `return`. The public result distinguishes invalid input/state, yielded fibers, completed fibers, and runtime-error/interruption exits.
 
-Host-side fiber resume is not exposed in this slice. The current VM scheduler implements `resume` by switching `vm->fiber` to a child or parent inside `vmLoop`. A host resume API needs an explicit host-boundary stop when a child yields back to a parent that is no longer suspended inside an Umka `resume` call; otherwise the VM can continue at `RETURN_FROM_VM` rather than at a source-level resume site. For now, hosts resume retained fibers by passing them back to Umka code that calls `resume`.
+Host resume is intentionally limited to an interpreter that is alive and idle at the normal host call boundary. The target fiber must be a live child of that idle VM fiber, so native callbacks, hooks, current/running fibers, foreign fibers, non-fiber handles, and fibers owned by another suspended parent are rejected instead of being reparented implicitly. Runtime errors and interruptions use the normal Umka error path and terminate the interpreter; the API restores transient host-resume parent state before returning `UMKA_FIBER_RESUME_ERROR`.
+
+Host-side fiber creation is still not exposed. Creating a fiber requires a closure, parent fiber selection, stack initialization, and upvalue ownership rules that are currently implemented only by Umka `make(fiber, ...)`.
 
 ## 5. UmkaSharp Integration
 
