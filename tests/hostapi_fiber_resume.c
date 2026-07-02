@@ -41,6 +41,16 @@ static const char *source =
     "    resume(child)\n"
     "}\n"
     "\n"
+    "fn makeNestedOwner*(): fiber {\n"
+    "    return make(fiber, fn () {\n"
+    "        inner := makeChild()\n"
+    "        hostCaptureFiber(inner)\n"
+    "        resume()\n"
+    "        resume(inner)\n"
+    "        resume(inner)\n"
+    "    })\n"
+    "}\n"
+    "\n"
     "fn setStep*(value: int) {step = value}\n"
     "fn getStep*(): int {return step}\n"
     "fn makeFiberAny*(): any {return makeChild()}\n"
@@ -67,6 +77,12 @@ static const char *errorSource =
 static const char *interruptSource =
     "fn makeLoopChild*(): fiber {\n"
     "    return make(fiber, fn () {for true {}})\n"
+    "}\n";
+
+
+static const char *foreignSource =
+    "fn makeForeignChild*(): fiber {\n"
+    "    return make(fiber, fn () {})\n"
     "}\n";
 
 
@@ -317,6 +333,48 @@ static int checkCallbackFiberResume(Umka *umka)
 }
 
 
+static int checkNonChildFiberRejected(Umka *umka)
+{
+    UmkaAPI *api = umkaGetAPI(umka);
+    UmkaFuncContext fn = {0};
+    if (getFunc(umka, "makeNestedOwner", &fn))
+        return 1;
+
+    int err = api->umkaCall(umka, &fn);
+    if (err)
+        return failUmka(umka, "makeNestedOwner");
+
+    UmkaStackSlot outer = *api->umkaGetResult(fn.params, fn.result);
+    const UmkaType *fiberType = api->umkaGetResultType(fn.params, fn.result);
+    UmkaHostHandle outerHandle = {0};
+    api->umkaMakeHostHandle(&outerHandle);
+
+    int status = retainFiber(umka, outer, &outerHandle);
+
+    void *resultStorage = outer.ptrVal;
+    if (!api->umkaReleaseHostValue(umka, &resultStorage, fiberType))
+        status |= fail("releasing nested owner result failed");
+
+    status |= callSetStep(umka, 0);
+    if (!status && api->umkaResumeFiber(umka, &outerHandle) != UMKA_FIBER_RESUME_YIELDED)
+        status |= fail("nested owner did not yield to host");
+    if (callbackFailures)
+        status |= fail("nested callback capture failed");
+
+    if (!status && api->umkaResumeFiber(umka, &retainedCallbackFiber) != UMKA_FIBER_RESUME_INVALID)
+        status |= fail("fiber owned by suspended parent was host-resumed");
+
+    if (!status && api->umkaResumeFiber(umka, &outerHandle) != UMKA_FIBER_RESUME_DONE)
+        status |= fail("nested owner did not complete");
+    status |= callGetStep(umka, 2);
+
+    api->umkaClearHostHandle(&retainedCallbackFiber);
+    api->umkaMakeHostHandle(&retainedCallbackFiber);
+    api->umkaClearHostHandle(&outerHandle);
+    return status;
+}
+
+
 static int retainFiberFromAny(Umka *umka, const UmkaAny *any, UmkaHostHandle *handle)
 {
     UmkaAPI *api = umkaGetAPI(umka);
@@ -536,6 +594,41 @@ static Umka *makeRuntime(const char *fileName, const char *program)
 }
 
 
+static int checkForeignFiberRejected(Umka *umka)
+{
+    Umka *foreign = makeRuntime("hostapi_fiber_resume_foreign.um", foreignSource);
+    if (!foreign)
+        return 1;
+
+    UmkaFuncContext fn = {0};
+    if (getFunc(foreign, "makeForeignChild", &fn))
+    {
+        umkaFree(foreign);
+        return 1;
+    }
+
+    int status = 0;
+    int err = umkaCall(foreign, &fn);
+    if (err)
+        status |= failUmka(foreign, "makeForeignChild");
+
+    UmkaStackSlot foreignFiber = *umkaGetResult(fn.params, fn.result);
+    if (!status && umkaResumeFiberValue(umka, foreignFiber) != UMKA_FIBER_RESUME_INVALID)
+        status |= fail("foreign fiber was accepted by umkaResumeFiberValue");
+
+    if (!status && umkaResumeFiberValue(foreign, foreignFiber) != UMKA_FIBER_RESUME_DONE)
+        status |= fail("foreign runtime could not complete its own fiber");
+
+    const UmkaType *fiberType = umkaGetResultType(fn.params, fn.result);
+    void *resultStorage = foreignFiber.ptrVal;
+    if (!umkaReleaseHostValue(foreign, &resultStorage, fiberType))
+        status |= fail("releasing foreign fiber failed");
+
+    umkaFree(foreign);
+    return status;
+}
+
+
 static int checkRuntimeErrorResume(void)
 {
     Umka *umka = makeRuntime("hostapi_fiber_resume_error.um", errorSource);
@@ -650,10 +743,12 @@ int main(void)
     status |= runCheck("checkHandleResumeFromResult", checkHandleResumeFromResult, umka);
     status |= runCheck("checkDirectValueResume", checkDirectValueResume, umka);
     status |= runCheck("checkCallbackFiberResume", checkCallbackFiberResume, umka);
+    status |= runCheck("checkNonChildFiberRejected", checkNonChildFiberRejected, umka);
     status |= runCheck("checkAnyFiberResume", checkAnyFiberResume, umka);
     status |= runCheck("checkMapFiberResume", checkMapFiberResume, umka);
     status |= runCheck("checkArrayFiberResume", checkArrayFiberResume, umka);
     status |= runCheck("checkNegativeCases", checkNegativeCases, umka);
+    status |= checkForeignFiberRejected(umka);
 
     if (callbackFailures)
         status = 1;
