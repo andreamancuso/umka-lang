@@ -316,6 +316,16 @@ static int inspectAnyEntry(Umka *umka, UmkaAPI *api, const UmkaHostHandle *handl
             return ok ? 0 : fail("closure payload retain failed");
         }
 
+        case UMKA_TYPE_FIBER:
+        {
+            UmkaHostHandle retained = {0};
+            umkaMakeHostHandle(&retained);
+            bool ok = api->umkaFiberValid(umka, payload) &&
+                      api->umkaRetainHostValue(umka, &retained, payloadType, payload);
+            umkaClearHostHandle(&retained);
+            return ok ? 0 : fail("fiber payload retain failed");
+        }
+
         default:
             return 0;
     }
@@ -362,12 +372,15 @@ static int checkAnyMap(Umka *umka)
 }
 
 
-static int checkFiberPayloadRejected(Umka *umka)
+static int checkFiberPayloadRetained(Umka *umka)
 {
+    UmkaAPI *api = umkaGetAPI(umka);
     UmkaHostHandle handle = {0};
     umkaMakeHostHandle(&handle);
 
-    int status = callRetainedResult(umka, "makeFiberAnyMap", &handle, false);
+    int status = callRetainedResult(umka, "makeFiberAnyMap", &handle, true);
+    if (!status)
+        status |= inspectAnyEntry(umka, api, &handle, "fiber", UMKA_TYPE_FIBER);
     umkaClearHostHandle(&handle);
     return status;
 }
@@ -453,7 +466,7 @@ int main(void)
     status |= checkStringIntMap(umka);
     status |= checkIntKeyNegativeCase(umka);
     status |= checkAnyMap(umka);
-    status |= checkFiberPayloadRejected(umka);
+    status |= checkFiberPayloadRetained(umka);
     status |= checkInvalidCases(umka);
 
     umkaFree(umka);

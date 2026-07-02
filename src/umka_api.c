@@ -278,6 +278,34 @@ UMKA_API bool umkaRetainHostValue(Umka *umka, UmkaHostHandle *handle, const Umka
 }
 
 
+UMKA_API bool umkaFiberValid(Umka *umka, UmkaStackSlot fiber)
+{
+    const Slot *fiberPtr = (Slot *)&fiber;
+    return umka && vmFiberValid(&umka->vm, *fiberPtr);
+}
+
+
+UMKA_API bool umkaFiberAlive(Umka *umka, UmkaStackSlot fiber)
+{
+    const Slot *fiberPtr = (Slot *)&fiber;
+    return umka && vmFiberAlive(&umka->vm, *fiberPtr);
+}
+
+
+UMKA_API bool umkaFiberRunning(Umka *umka, UmkaStackSlot fiber)
+{
+    const Slot *fiberPtr = (Slot *)&fiber;
+    return umka && vmFiberRunning(&umka->vm, *fiberPtr);
+}
+
+
+UMKA_API bool umkaRetainHostFiber(Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber)
+{
+    const Slot *fiberPtr = (Slot *)&fiber;
+    return umka && vmRetainHostValue(&umka->vm, handle, umka->types.predecl.fiberType, *fiberPtr);
+}
+
+
 UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr)
 {
     return vmRetainHostData(&umka->vm, handle, ptr);

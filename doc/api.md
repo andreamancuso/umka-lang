@@ -1057,10 +1057,10 @@ Notes:
 * These APIs operate on the current fixed length of a dynamic array. They do not resize, append, insert, delete, or expose capacity
 * `umkaSetDynArrayItem` increments references held by the new item, decrements references held by the old item, then copies the new item bytes
 * `[]any` construction is supported by creating each concrete value with `umkaMakeAny`, passing a pointer to that `UmkaAny` in `item.ptrVal`, and releasing the temporary `UmkaAny` with `umkaReleaseHostValue` when it is not consumed elsewhere
-* Supported `[]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps including `map[str]any`, and closures whose captured upvalue cell is supported
+* Supported `[]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps including `map[str]any`, closures whose captured upvalue cell is supported, and same-runtime Umka-created fibers
 * `umkaGetDynArrayItem` returns borrowed pointers for reference-bearing or structured values. Retain the item with `umkaRetainHostDynArrayItem` if it must outlive the array storage from which it was read
 * `false` is returned for `NULL` arguments, uninitialized arrays, non-dynamic-array storage, invalid indices, wrong item types, unsupported payloads, or `umkaGetDynArrayAnyItem` used on a non-`[]any` array
-* Unsupported cases include dynamic-array resizing, append, insert, delete, fiber payloads, pointers, weak pointers, unsupported nested interfaces or closure upvalues, and arbitrary managed heap wrappers
+* Unsupported cases include dynamic-array resizing, append, insert, delete, host-created fibers, pointers, weak pointers, unsupported nested interfaces or closure upvalues, and arbitrary managed heap wrappers
 
 ```
 UMKA_API void *umkaMakeStruct(Umka *umka, const UmkaType *type);
@@ -1148,9 +1148,9 @@ Returned value: `true` if the value has been assigned, otherwise `false`.
 Notes:
 
 * The assignment increments references held by the new value, decrements references held by the old destination value, then copies the new value bytes
-* Supported types are ordinal and real values, `bool`, `char`, direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
+* Supported types are ordinal and real values, `bool`, `char`, direct `str`, `fn`, same-runtime Umka-created fibers, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
 * Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items. `map[str]any` and `[]any` values are accepted when every inserted `any` payload is supported by `umkaMakeAny`
-* Dynamic values whose concrete self is an ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, or supported closure are accepted. Pointer, weak pointer, nested interface, and fiber concrete values are rejected
+* Dynamic values whose concrete self is an ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, same-runtime Umka-created fiber, or supported closure are accepted. Pointer, weak pointer, and nested interface concrete values are rejected
 * Direct `str` values must be `NULL` or Umka strings created by `umkaMakeStr`
 * If `dest` is a parameter slot in an `UmkaFuncContext`, a successful `umkaCall` consumes that assigned parameter reference through normal function cleanup. Do not call `umkaReleaseHostValue` on that same parameter slot after the call returns. For host-owned storage that is not consumed by an Umka call, release it explicitly
 
@@ -1256,16 +1256,59 @@ Returned value: `true` if the value has been retained, otherwise `false`.
 
 Notes:
 
-* Supported root value types are direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
-* Fixed arrays, structures, dynamic arrays, and maps may contain ordinal, real, `str`, dynamic array, map, fixed array, structure, interface, and closure fields/items when the actual retained values are supported. Pointers, weak pointers, fibers, unsupported nested interfaces, and unsupported closure upvalues are rejected
-* Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, and supported closure values are supported
+* Supported root value types are direct `str`, `fn`, same-runtime Umka-created fibers, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and `any` or interface values whose concrete self value is supported
+* Fixed arrays, structures, dynamic arrays, and maps may contain ordinal, real, `str`, dynamic array, map, fixed array, structure, interface, fiber, and closure fields/items when the actual retained values are supported. Pointers, weak pointers, unsupported nested interfaces, and unsupported closure upvalues are rejected
+* Retained `any` and interface values copy the full interface cell and the concrete self value into handle-owned storage. Concrete ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, same-runtime Umka-created fiber, and supported closure values are supported
 * Non-empty interface method-table fields are preserved in the copied interface cell
-* Dynamic values whose concrete self is a pointer, weak pointer, nested interface, or fiber are rejected by retention, although `umkaGetAnyValue` can still inspect them
+* Dynamic values whose concrete self is a pointer, weak pointer, or nested interface are rejected by retention, although `umkaGetAnyValue` can still inspect them
 * Empty dynamic values may be retained. `umkaGetAnyValue` returns `false` for them
 * For dynamic arrays and maps, the handle retains the existing backing heap storage; it does not deep-copy the array items or map nodes
 * For fixed arrays and structures, the handle stores a C-side byte copy and adjusts recursive reference counts for supported reference-bearing fields
 * For closures, the handle stores a C-side closure copy and retains the captured upvalue cell if it is non-empty and supported. A retained closure can be called with `umkaMakeCallableContext` and `umkaCallCallable`
+* For fibers, the handle retains the existing fiber context. Clear a retained live fiber only after it has completed or while another Umka value still owns it; destroying the last reference to a live fiber is rejected by the VM because its stack may still own references
 * `NULL` is a valid retained `str` value. Structured values require a non-`NULL` `ptrVal`
+
+```
+UMKA_API bool umkaFiberValid(Umka *umka, UmkaStackSlot fiber);
+UMKA_API bool umkaFiberAlive(Umka *umka, UmkaStackSlot fiber);
+UMKA_API bool umkaFiberRunning(Umka *umka, UmkaStackSlot fiber);
+```
+Queries the status of an Umka-created fiber value.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `fiber`: Fiber value in `ptrVal`
+
+Returned value: `true` if the queried condition holds, otherwise `false`.
+
+Notes:
+
+* `umkaFiberValid` returns `true` only for a non-null fiber allocated by the same interpreter and still present in that interpreter heap
+* `umkaFiberAlive` is equivalent to Umka `valid(fiber)` for a valid same-runtime fiber
+* `umkaFiberRunning` returns `true` only for the currently executing VM fiber. It normally returns `false` after control has returned to the host
+* These functions return `false` for null runtimes, null fibers, foreign fibers, invalid pointers, and interpreters that are no longer alive
+
+```
+UMKA_API bool umkaRetainHostFiber(Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber);
+```
+Retains a same-runtime Umka-created fiber in a host handle.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `handle`: Initialized host handle
+* `fiber`: Fiber value in `ptrVal`
+
+Returned value: `true` if the fiber has been retained, otherwise `false`.
+
+Notes:
+
+* This is a convenience wrapper around `umkaRetainHostValue` with the built-in fiber type
+* Fibers can also be retained when they are the concrete value inside `any`, `map[str]any`, or `[]any`, provided the fiber belongs to the same interpreter
+* Host-created fibers are not exposed. Hosts can obtain fibers only from Umka code, callback arguments, results, or retained containers
+* Host-side resume is not exposed by this API. Resume retained fibers by passing them back to Umka code that calls `resume`
+* The current VM scheduler resumes by switching `vm->fiber` to the child or parent fiber. A host resume API would need an explicit host-boundary stop when a child yields back to a parent that is no longer suspended inside an Umka `resume` call
 
 ```
 UMKA_API bool umkaRetainHostData(Umka *umka, UmkaHostHandle *handle, void *ptr);
@@ -1407,7 +1450,7 @@ Notes:
 * `umkaGetHostMapEntryAnyValue` is intended for built-in `any` map item values. Other value kinds return `false`
 * `umkaRetainHostMapEntryKey` and `umkaRetainHostMapEntryValue` use the same support and ownership rules as `umkaRetainHostValue`
 * String pointers and structured pointers returned through snapshot slots are borrowed from retained map storage. Retain the entry key or value in a separate host handle if it must outlive the map handle
-* Unsupported cases include map mutation through these APIs, arbitrary reference-bearing map keys, fiber payload retention, unsupported `any` payloads, and borrowed map entry pointers
+* Unsupported cases include map mutation through these APIs, arbitrary reference-bearing map keys, unsupported `any` payloads, borrowed map entry pointers, and host-side fiber resume
 
 ## Accessing Umka API dynamically
 

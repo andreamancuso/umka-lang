@@ -491,6 +491,16 @@ static int inspectAnyArrayItem(Umka *umka, UmkaAPI *api, const AnyArray *array, 
             return ok ? 0 : fail("retaining closure array any item failed");
         }
 
+        case UMKA_TYPE_FIBER:
+        {
+            UmkaHostHandle handle = {0};
+            api->umkaMakeHostHandle(&handle);
+            bool ok = api->umkaFiberValid(umka, payload) &&
+                      api->umkaRetainHostDynArrayItem(umka, array, index, &handle);
+            api->umkaClearHostHandle(&handle);
+            return ok ? 0 : fail("retaining fiber array any item failed");
+        }
+
         default:
             return 0;
     }
@@ -518,6 +528,19 @@ static int inspectAnyArray(Umka *umka, const AnyArray *array)
     status |= inspectAnyArrayItem(umka, api, array, 10, UMKA_TYPE_MAP);
     status |= inspectAnyArrayItem(umka, api, array, 11, UMKA_TYPE_CLOSURE);
 
+    return status;
+}
+
+
+static int inspectFiberAnyArray(Umka *umka, const AnyArray *array)
+{
+    UmkaAPI *api = umkaGetAPI(umka);
+    int status = 0;
+
+    if (api->umkaGetDynArrayLen(array) != 1)
+        status |= fail("fiber []any length mismatch");
+
+    status |= inspectAnyArrayItem(umka, api, array, 0, UMKA_TYPE_FIBER);
     return status;
 }
 
@@ -586,7 +609,10 @@ static int inspectUmkaArrayResult(Umka *umka, const char *name, bool expectRetai
     if (!status && expectRetain)
     {
         UmkaStackSlot retainedValue = api->umkaGetHostHandleValue(&handle);
-        status |= inspectAnyArray(umka, (const AnyArray *)retainedValue.ptrVal);
+        if (strcmp(name, "makeFiberAnyArray") == 0)
+            status |= inspectFiberAnyArray(umka, (const AnyArray *)retainedValue.ptrVal);
+        else
+            status |= inspectAnyArray(umka, (const AnyArray *)retainedValue.ptrVal);
     }
 
     api->umkaClearHostHandle(&handle);
@@ -776,7 +802,7 @@ int main(void)
     status |= callScoreArrayWithHostAssignedArray(umka, expectedScore);
     status |= inspectRetainedHostArray(umka);
     status |= inspectUmkaArrayResult(umka, "makeAnyArray", true);
-    status |= inspectUmkaArrayResult(umka, "makeFiberAnyArray", false);
+    status |= inspectUmkaArrayResult(umka, "makeFiberAnyArray", true);
     status |= testDirectIntArrayItems(umka);
     status |= testReplacement(umka);
     status |= testNegativeCases(umka);

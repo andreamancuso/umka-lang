@@ -267,6 +267,10 @@ typedef bool (*UmkaMakeCallableContext)         (Umka *umka, const UmkaType *typ
 typedef int  (*UmkaCallCallable)                (Umka *umka, const UmkaType *type, UmkaStackSlot value, UmkaFuncContext *fn);
 typedef void (*UmkaMakeHostHandle)              (UmkaHostHandle *handle);
 typedef bool (*UmkaRetainHostValue)             (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
+typedef bool (*UmkaFiberValid)                  (Umka *umka, UmkaStackSlot fiber);
+typedef bool (*UmkaFiberAlive)                  (Umka *umka, UmkaStackSlot fiber);
+typedef bool (*UmkaFiberRunning)                (Umka *umka, UmkaStackSlot fiber);
+typedef bool (*UmkaRetainHostFiber)             (Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber);
 typedef bool (*UmkaRetainHostData)              (Umka *umka, UmkaHostHandle *handle, void *ptr);
 typedef void (*UmkaClearHostHandle)             (UmkaHostHandle *handle);
 typedef void (*UmkaReleaseHostHandle)           (UmkaHostHandle *handle);
@@ -331,6 +335,10 @@ typedef struct
     UmkaSetMapItem      umkaSetMapItem;
     UmkaMakeHostHandle  umkaMakeHostHandle;
     UmkaRetainHostValue umkaRetainHostValue;
+    UmkaFiberValid      umkaFiberValid;
+    UmkaFiberAlive      umkaFiberAlive;
+    UmkaFiberRunning    umkaFiberRunning;
+    UmkaRetainHostFiber umkaRetainHostFiber;
     UmkaRetainHostData  umkaRetainHostData;
     UmkaClearHostHandle umkaClearHostHandle;
     UmkaReleaseHostHandle umkaReleaseHostHandle;
@@ -460,6 +468,10 @@ UMKA_API bool umkaMakeCallableContext       (Umka *umka, const UmkaType *type, U
 UMKA_API int  umkaCallCallable              (Umka *umka, const UmkaType *type, UmkaStackSlot value, UmkaFuncContext *fn);
 UMKA_API void umkaMakeHostHandle            (UmkaHostHandle *handle);
 UMKA_API bool umkaRetainHostValue           (Umka *umka, UmkaHostHandle *handle, const UmkaType *type, UmkaStackSlot value);
+UMKA_API bool umkaFiberValid                (Umka *umka, UmkaStackSlot fiber);
+UMKA_API bool umkaFiberAlive                (Umka *umka, UmkaStackSlot fiber);
+UMKA_API bool umkaFiberRunning              (Umka *umka, UmkaStackSlot fiber);
+UMKA_API bool umkaRetainHostFiber           (Umka *umka, UmkaHostHandle *handle, UmkaStackSlot fiber);
 UMKA_API bool umkaRetainHostData            (Umka *umka, UmkaHostHandle *handle, void *ptr);
 UMKA_API void umkaClearHostHandle           (UmkaHostHandle *handle);
 UMKA_API void umkaReleaseHostHandle         (UmkaHostHandle *handle);

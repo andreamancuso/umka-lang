@@ -665,6 +665,36 @@ static FORCE_INLINE HeapPage *pageFind(HeapPages *pages, void *ptr)
 }
 
 
+static FORCE_INLINE bool pageContainsAddress(const HeapPage *page, void *ptr)
+{
+    return ptr >= (void *)page->data && ptr < (void *)page->end;
+}
+
+
+static FORCE_INLINE HeapPage *pageFindAddress(HeapPages *pages, void *ptr)
+{
+    if (pages->lowest && ptr < (void *)pages->lowest)
+        return NULL;
+
+    if (pages->highest && ptr >= (void *)pages->highest)
+        return NULL;
+
+    if (pages->lastAccessed && pageContainsAddress(pages->lastAccessed, ptr))
+        return pages->lastAccessed;
+
+    for (HeapPage *page = pages->first; page; page = page->next)
+    {
+        if (page != pages->lastAccessed && pageContainsAddress(page, ptr))
+        {
+            pages->lastAccessed = page;
+            return page;
+        }
+    }
+
+    return NULL;
+}
+
+
 static FORCE_INLINE HeapPage *pageFindForAlloc(HeapPages *pages, int chunkSize)
 {
     HeapPage *bestPage = NULL;
@@ -1415,9 +1445,9 @@ static void doRefCntImpl(HeapPages *pages, void *ptr, const Type *type, TokenKin
 }
 
 
-static bool doHostHandleInterfaceValueSupported(const Interface *interface, int depth, Error *error);
-static bool doHostHandleClosureValueSupported(const Closure *closure, int depth, Error *error);
-static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int depth, Error *error);
+static bool doHostHandleInterfaceValueSupported(HeapPages *pages, const Interface *interface, int depth, Error *error);
+static bool doHostHandleClosureValueSupported(HeapPages *pages, const Closure *closure, int depth, Error *error);
+static bool doHostHandleRetainValueSupported(HeapPages *pages, const Type *type, Slot value, int depth, Error *error);
 
 
 static bool doHostHandleContainedTypeSupported(const Type *type, int depth)
@@ -1455,7 +1485,7 @@ static bool doHostHandleRetainContainedTypeSupported(const Type *type, int depth
     if (!type || depth <= 0)
         return false;
 
-    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR)
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FIBER)
         return true;
 
     switch (type->kind)
@@ -1492,6 +1522,7 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
     switch (type->kind)
     {
         case TYPE_FN:
+        case TYPE_FIBER:
             return true;
 
         case TYPE_STR:
@@ -1510,7 +1541,43 @@ static FORCE_INLINE bool doHostHandleValueTypeSupported(const Type *type)
 }
 
 
-static bool doHostHandleInterfaceValueSupported(const Interface *interface, int depth, Error *error)
+static bool doHostFiberValueValid(HeapPages *pages, const Fiber *fiber)
+{
+    if (!pages || !fiber)
+        return false;
+
+    const uintptr_t fiberAddr = (uintptr_t)fiber;
+    if (fiberAddr < MEM_MIN_HEAP_CHUNK || fiberAddr % sizeof(int64_t) != 0)
+        return false;
+    if (pages->lowest && fiberAddr < (uintptr_t)pages->lowest)
+        return false;
+    if (pages->highest && fiberAddr > (uintptr_t)pages->highest)
+        return false;
+
+    HeapPage *page = pageFindAddress(pages, (void *)fiber);
+    if (!page)
+        return false;
+
+    const HeapChunk *chunk = pageGetChunk(page, (void *)fiber);
+    if (chunk->isStack || chunk->refCnt <= 0 || chunk->size != sizeof(Fiber) || (void *)chunk->data != (void *)fiber)
+        return false;
+
+    if (!fiber->vm || &fiber->vm->pages != pages)
+        return false;
+
+    if (!fiber->stack || fiber->stackSize <= 0)
+        return false;
+
+    HeapPage *stackPage = pageFindAddress(pages, fiber->stack);
+    if (!stackPage)
+        return false;
+
+    const HeapChunk *stackChunk = pageGetChunk(stackPage, fiber->stack);
+    return stackChunk->isStack && stackChunk->refCnt > 0 && (void *)stackChunk->data == (void *)fiber->stack;
+}
+
+
+static bool doHostHandleInterfaceValueSupported(HeapPages *pages, const Interface *interface, int depth, Error *error)
 {
     if (!interface || depth <= 0)
         return false;
@@ -1526,22 +1593,25 @@ static bool doHostHandleInterfaceValueSupported(const Interface *interface, int 
         return *(int64_t *)interface->self > 0;
 
     if (base->kind == TYPE_CLOSURE)
-        return doHostHandleClosureValueSupported((const Closure *)interface->self, depth - 1, error);
+        return doHostHandleClosureValueSupported(pages, (const Closure *)interface->self, depth - 1, error);
 
-    if (base->kind == TYPE_PTR || base->kind == TYPE_WEAKPTR || base->kind == TYPE_INTERFACE || base->kind == TYPE_FIBER)
+    if (base->kind == TYPE_FIBER)
+        return doHostFiberValueValid(pages, *(Fiber **)interface->self);
+
+    if (base->kind == TYPE_PTR || base->kind == TYPE_WEAKPTR || base->kind == TYPE_INTERFACE)
         return false;
 
     Slot self = {.ptrVal = interface->self};
-    return doHostHandleRetainValueSupported(base, self, depth - 1, error);
+    return doHostHandleRetainValueSupported(pages, base, self, depth - 1, error);
 }
 
 
-static bool doHostHandleClosureValueSupported(const Closure *closure, int depth, Error *error)
+static bool doHostHandleClosureValueSupported(HeapPages *pages, const Closure *closure, int depth, Error *error)
 {
     return closure &&
            depth > 0 &&
            closure->entryOffset > 0 &&
-           doHostHandleInterfaceValueSupported(&closure->upvalue, depth - 1, error);
+           doHostHandleInterfaceValueSupported(pages, &closure->upvalue, depth - 1, error);
 }
 
 
@@ -1550,7 +1620,7 @@ static bool doHostAssignableTypeSupported(const Type *type)
     if (!type)
         return false;
 
-    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN)
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN || type->kind == TYPE_FIBER)
         return true;
 
     switch (type->kind)
@@ -1586,7 +1656,7 @@ static bool doHostReleasableTypeSupported(const Type *type)
     if (!type)
         return false;
 
-    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN)
+    if (typeKindOrdinal(type->kind) || typeKindReal(type->kind) || type->kind == TYPE_STR || type->kind == TYPE_FN || type->kind == TYPE_FIBER)
         return true;
 
     switch (type->kind)
@@ -1618,11 +1688,14 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
     if (type->kind == TYPE_FN)
         return value.intVal > 0;
 
+    if (type->kind == TYPE_FIBER)
+        return doHostFiberValueValid(pages, (const Fiber *)value.ptrVal);
+
     if (type->kind == TYPE_CLOSURE)
-        return doHostHandleClosureValueSupported((const Closure *)value.ptrVal, 32, pages->error);
+        return doHostHandleClosureValueSupported(pages, (const Closure *)value.ptrVal, 32, pages->error);
 
     if (type->kind == TYPE_INTERFACE)
-        return value.ptrVal && doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal, 32, pages->error);
+        return value.ptrVal && doHostHandleInterfaceValueSupported(pages, (const Interface *)value.ptrVal, 32, pages->error);
 
     if (typeStructured(type))
     {
@@ -1633,14 +1706,14 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
         {
             const DynArray *array = (const DynArray *)value.ptrVal;
             return array->type && typeEquivalent(array->type, type) && array->data &&
-                   doHostHandleRetainValueSupported(type, value, 32, pages->error);
+                   doHostHandleRetainValueSupported(pages, type, value, 32, pages->error);
         }
 
         if (type->kind == TYPE_MAP)
         {
             const Map *map = (const Map *)value.ptrVal;
             return map->type && typeEquivalent(map->type, type) &&
-                   doHostHandleRetainValueSupported(type, value, 32, pages->error);
+                   doHostHandleRetainValueSupported(pages, type, value, 32, pages->error);
         }
     }
 
@@ -1998,7 +2071,7 @@ static const MapNode *doGetMapNodeAtIndex(const Map *map, int64_t index)
 }
 
 
-static bool doHostHandleRetainArrayItemsSupported(const Type *itemType, const void *items, int64_t len, int64_t itemSize, int depth, Error *error)
+static bool doHostHandleRetainArrayItemsSupported(HeapPages *pages, const Type *itemType, const void *items, int64_t len, int64_t itemSize, int depth, Error *error)
 {
     if (!itemType || !items || len < 0 || itemSize <= 0)
         return false;
@@ -2007,7 +2080,7 @@ static bool doHostHandleRetainArrayItemsSupported(const Type *itemType, const vo
     {
         Slot item = {.ptrVal = (char *)items + i * itemSize};
         doDerefImpl(&item, itemType->kind, error);
-        if (!doHostHandleRetainValueSupported(itemType, item, depth - 1, error))
+        if (!doHostHandleRetainValueSupported(pages, itemType, item, depth - 1, error))
             return false;
     }
 
@@ -2015,12 +2088,12 @@ static bool doHostHandleRetainArrayItemsSupported(const Type *itemType, const vo
 }
 
 
-static bool doHostHandleRetainMapNodesSupported(const Map *map, const MapNode *node, int depth, Error *error)
+static bool doHostHandleRetainMapNodesSupported(HeapPages *pages, const Map *map, const MapNode *node, int depth, Error *error)
 {
     if (!node)
         return true;
 
-    if (!doHostHandleRetainMapNodesSupported(map, node->left, depth, error))
+    if (!doHostHandleRetainMapNodesSupported(pages, map, node->left, depth, error))
         return false;
 
     if (node->key)
@@ -2036,16 +2109,16 @@ static bool doHostHandleRetainMapNodesSupported(const Map *map, const MapNode *n
         doDerefImpl(&key, keyType->kind, error);
         doDerefImpl(&item, itemType->kind, error);
 
-        if (!doHostHandleRetainValueSupported(keyType, key, depth - 1, error) ||
-            !doHostHandleRetainValueSupported(itemType, item, depth - 1, error))
+        if (!doHostHandleRetainValueSupported(pages, keyType, key, depth - 1, error) ||
+            !doHostHandleRetainValueSupported(pages, itemType, item, depth - 1, error))
             return false;
     }
 
-    return doHostHandleRetainMapNodesSupported(map, node->right, depth, error);
+    return doHostHandleRetainMapNodesSupported(pages, map, node->right, depth, error);
 }
 
 
-static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int depth, Error *error)
+static bool doHostHandleRetainValueSupported(HeapPages *pages, const Type *type, Slot value, int depth, Error *error)
 {
     if (!type || depth <= 0)
         return false;
@@ -2061,23 +2134,26 @@ static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int d
         case TYPE_FN:
             return value.intVal > 0;
 
+        case TYPE_FIBER:
+            return doHostFiberValueValid(pages, (const Fiber *)value.ptrVal);
+
         case TYPE_DYNARRAY:
         {
             const DynArray *array = (const DynArray *)value.ptrVal;
             return array && array->type && typeEquivalent(array->type, type) && array->data &&
-                   doHostHandleRetainArrayItemsSupported(type->base, array->data, getDims(array)->len, array->itemSize, depth, error);
+                   doHostHandleRetainArrayItemsSupported(pages, type->base, array->data, getDims(array)->len, array->itemSize, depth, error);
         }
 
         case TYPE_MAP:
         {
             const Map *map = (const Map *)value.ptrVal;
             return map && map->type && typeEquivalent(map->type, type) && map->root &&
-                   doHostHandleRetainMapNodesSupported(map, map->root, depth, error);
+                   doHostHandleRetainMapNodesSupported(pages, map, map->root, depth, error);
         }
 
         case TYPE_ARRAY:
             return value.ptrVal &&
-                   doHostHandleRetainArrayItemsSupported(type->base, value.ptrVal, type->numItems, type->base->size, depth, error);
+                   doHostHandleRetainArrayItemsSupported(pages, type->base, value.ptrVal, type->numItems, type->base->size, depth, error);
 
         case TYPE_STRUCT:
             if (!value.ptrVal)
@@ -2088,16 +2164,16 @@ static bool doHostHandleRetainValueSupported(const Type *type, Slot value, int d
                 const Type *fieldType = type->field[i]->type;
                 Slot field = {.ptrVal = (char *)value.ptrVal + type->field[i]->offset};
                 doDerefImpl(&field, fieldType->kind, error);
-                if (!doHostHandleRetainValueSupported(fieldType, field, depth - 1, error))
+                if (!doHostHandleRetainValueSupported(pages, fieldType, field, depth - 1, error))
                     return false;
             }
             return true;
 
         case TYPE_INTERFACE:
-            return doHostHandleInterfaceValueSupported((const Interface *)value.ptrVal, depth, error);
+            return doHostHandleInterfaceValueSupported(pages, (const Interface *)value.ptrVal, depth, error);
 
         case TYPE_CLOSURE:
-            return doHostHandleClosureValueSupported((const Closure *)value.ptrVal, depth, error);
+            return doHostHandleClosureValueSupported(pages, (const Closure *)value.ptrVal, depth, error);
 
         default:
             return false;
@@ -5156,6 +5232,26 @@ bool vmRetainHostMapEntryValue(VM *vm, const UmkaHostMapEntry *entry, UmkaHostHa
 }
 
 
+bool vmFiberValid(VM *vm, Slot fiber)
+{
+    return vm && vmAlive(vm) && doHostFiberValueValid(&vm->pages, (const Fiber *)fiber.ptrVal);
+}
+
+
+bool vmFiberAlive(VM *vm, Slot fiber)
+{
+    const Fiber *resolved = (const Fiber *)fiber.ptrVal;
+    return vmFiberValid(vm, fiber) && resolved->alive;
+}
+
+
+bool vmFiberRunning(VM *vm, Slot fiber)
+{
+    const Fiber *resolved = (const Fiber *)fiber.ptrVal;
+    return vmFiberValid(vm, fiber) && resolved == vm->fiber;
+}
+
+
 bool vmGetAnySelf(const UmkaAny *value, const Type **selfType, void **self)
 {
     const Interface *interface = (const Interface *)value;
@@ -5338,7 +5434,7 @@ void vmClearHostHandle(UmkaHostHandle *handle)
         }
         else
         {
-            void *ptr = type->kind == TYPE_STR ? value.ptrVal : handle->storage;
+            void *ptr = (type->kind == TYPE_STR || type->kind == TYPE_FIBER) ? value.ptrVal : handle->storage;
             doRefCntImpl(&vm->pages, ptr, type, TOK_MINUSMINUS);
         }
     }
@@ -5361,7 +5457,7 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
     if (type->kind == TYPE_INTERFACE)
     {
         const Interface *src = (const Interface *)value.ptrVal;
-        if (!doHostHandleInterfaceValueSupported(src, 32, vm->error))
+        if (!doHostHandleInterfaceValueSupported(&vm->pages, src, 32, vm->error))
             return false;
 
         const Type *base = src->self && src->selfType && src->selfType->kind == TYPE_PTR ? src->selfType->base : NULL;
@@ -5406,10 +5502,10 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
     if (type->kind == TYPE_FN && value.intVal <= 0)
         return false;
 
-    if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported((const Closure *)value.ptrVal, 32, vm->error))
+    if (type->kind == TYPE_CLOSURE && !doHostHandleClosureValueSupported(&vm->pages, (const Closure *)value.ptrVal, 32, vm->error))
         return false;
 
-    if (!doHostHandleRetainValueSupported(type, value, 32, vm->error))
+    if (!doHostHandleRetainValueSupported(&vm->pages, type, value, 32, vm->error))
         return false;
 
     void *storage = NULL;
@@ -5429,7 +5525,7 @@ bool vmRetainHostValue(VM *vm, UmkaHostHandle *handle, const Type *type, Slot va
         retained.ptrVal = storage;
     }
 
-    void *ptr = type->kind == TYPE_STR ? retained.ptrVal : storage;
+    void *ptr = (type->kind == TYPE_STR || type->kind == TYPE_FIBER) ? retained.ptrVal : storage;
     doRefCntImpl(&vm->pages, ptr, type, TOK_PLUSPLUS);
 
     vmClearHostHandle(handle);

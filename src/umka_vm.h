@@ -243,6 +243,9 @@ bool vmGetHostMapEntryStringKey (VM *vm, const UmkaHostMapEntry *entry, const ch
 bool vmGetHostMapEntryAnyValue  (VM *vm, const UmkaHostMapEntry *entry, UmkaAny *value);
 bool vmRetainHostMapEntryKey    (VM *vm, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
 bool vmRetainHostMapEntryValue  (VM *vm, const UmkaHostMapEntry *entry, UmkaHostHandle *handle);
+bool vmFiberValid               (VM *vm, Slot fiber);
+bool vmFiberAlive               (VM *vm, Slot fiber);
+bool vmFiberRunning             (VM *vm, Slot fiber);
 bool vmGetAnySelf               (const UmkaAny *value, const Type **selfType, void **self);
 bool vmGetAnyValue              (const UmkaAny *value, const Type **type, Slot *slot);
 bool vmAssignHostValue          (VM *vm, void *dest, const Type *type, Slot value);
