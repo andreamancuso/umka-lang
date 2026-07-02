@@ -8,7 +8,7 @@ Add public C APIs for host-side map allocation, insertion, assignment/reference-
 
 First fork slice status: `umkaMakeMap` and `umkaSetMapItem` provide additive host-side creation and insertion for fixed-layout non-reference key/item maps plus direct `str` key/item maps. This covers the initial UmkaSharp shapes needed for C# map arguments and callback map results, including `map[int]int`, `map[str]int`, and `map[str]str`.
 
-Remaining map construction work: arbitrary map construction for dynamic arrays, pointers, interfaces, closures, fibers, `any`, nested maps, and structures or arrays that contain unsupported reference-bearing fields.
+Remaining map construction work: arbitrary map construction for dynamic arrays, pointers, non-`any` interfaces, closures, fibers, nested maps, arbitrary reference-bearing keys, and structures or arrays that contain unsupported reference-bearing fields.
 
 ## 2. Rooted Heap Value Handles
 
@@ -42,7 +42,7 @@ Unsupported or deliberately deferred dynamic payloads are pointers, weak pointer
 
 Fifth fork slice status: `umkaAssignHostValue`, `umkaReleaseHostValue`, `umkaMakeAny`, and `umkaMakeInterface` provide additive host-side assignment and construction for supported values. `umkaAssignHostValue` gives caller-provided storage a reference-counted value and `umkaReleaseHostValue` releases host-owned storage. `umkaMakeAny` copies supported concrete values to VM heap storage and initializes `any` without exposing private interface layout. `umkaMakeInterface` does the same for non-empty interfaces and fills method-table entries by resolving compatible pointer receiver methods for the concrete type.
 
-Current construction limits: direct host pointer ownership, weak pointers, fibers, nested interface payloads, and containers with unsupported fields/items remain rejected. Direct function values and closures whose captured upvalue cell is supported can be assigned, retained, and boxed into `any`; hosts cannot synthesize arbitrary new closure entry points. Map creation still has the narrower `umkaMakeMap`/`umkaSetMapItem` construction limits for creating map contents, although existing supported map values can be assigned or boxed. Function parameter slots assigned by the host are consumed by normal Umka call cleanup after a successful `umkaCall`; host-owned storage that is not consumed by a call must be released explicitly.
+Current construction limits: direct host pointer ownership, weak pointers, fibers, nested interface payloads, and containers with unsupported fields/items remain rejected. Direct function values and closures whose captured upvalue cell is supported can be assigned, retained, and boxed into `any`; hosts cannot synthesize arbitrary new closure entry points. Map creation still has narrower `umkaMakeMap`/`umkaSetMapItem` construction limits outside direct scalar/string maps and `map[str]any`, although existing supported map values can be assigned or boxed. Function parameter slots assigned by the host are consumed by normal Umka call cleanup after a successful `umkaCall`; host-owned storage that is not consumed by a call must be released explicitly.
 
 Sixth fork slice status: `umkaCallableValid`, `umkaMakeCallableContext`, and `umkaCallCallable` provide additive host-side exposure for typed `fn` and closure values. Hosts can validate a callable, create a VM-backed call context, fill source-level arguments through `umkaGetParam`, and invoke it while the API refreshes and reference-counts the hidden closure upvalue parameter. Retained closures and closures deconstructed from `any` can be called through the same path. Runtime errors and interruption use the existing `umkaCall` result model and terminate the interpreter through the normal VM path.
 
@@ -56,7 +56,11 @@ Eighth fork slice status: `umkaGetHostMapCount`, `umkaGetHostMapEntry`, `umkaGet
 
 The first intended consumer shape is `map[str]any` returned by Umka. Retention now validates actual nested map and array contents, so supported interface, `any`, and closure payloads can be retained when their concrete values are supported. Fiber payloads still fail cleanly because this fork does not define host-side fiber ownership, resume, or disposal rules.
 
-Remaining read-only map work: managed UmkaSharp wrappers, mutation/versioning rules for entry descriptors, arbitrary reference-bearing key policies, and clearer long-term support for nested interface payloads. Remaining map construction work is still handled separately by `umkaMakeMap` and `umkaSetMapItem`; host-created arbitrary `map[str]any` values are not provided by this inspection slice.
+Remaining read-only map work: managed UmkaSharp wrappers, mutation/versioning rules for entry descriptors, arbitrary reference-bearing key policies, and clearer long-term support for nested interface payloads. Remaining map construction work is still handled separately by `umkaMakeMap` and `umkaSetMapItem`.
+
+Ninth fork slice status: `umkaMakeMap` and `umkaSetMapItem` now support host-created `map[str]any` in addition to the earlier direct scalar/string map shapes. Hosts create each `any` value with `umkaMakeAny`, insert it with a direct `str` key, and release their temporary `UmkaAny` storage with `umkaReleaseHostValue` if it is not otherwise consumed. The same map can be assigned into Umka parameter storage with `umkaAssignHostValue`, returned from native callbacks, retained with `UmkaHostHandle`, and inspected through the retained read-only map APIs.
+
+Supported `map[str]any` payloads are null, ordinal and real values, `str`, supported structures, supported dynamic arrays, supported maps, and closures whose captured upvalue cell is supported. Fiber payloads, direct pointers, weak pointers, unsupported nested interfaces, unsupported closure upvalues, arbitrary reference-bearing keys, and borrowed map entry pointers remain rejected.
 
 ## 5. UmkaSharp Integration
 

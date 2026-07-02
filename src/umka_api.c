@@ -253,7 +253,7 @@ UMKA_API void *umkaGetMapItem(Umka *umka, UmkaMap *map, UmkaStackSlot key)
 
 UMKA_API bool umkaMakeMap(Umka *umka, UmkaMap *map, const UmkaType *type)
 {
-    return vmMakeMap(&umka->vm, (Map *)map, type);
+    return umka && vmMakeMap(&umka->vm, (Map *)map, type, umka->types.predecl.anyType);
 }
 
 
@@ -261,7 +261,7 @@ UMKA_API bool umkaSetMapItem(Umka *umka, UmkaMap *map, UmkaStackSlot key, UmkaSt
 {
     const Slot *keyPtr = (Slot *)&key;
     const Slot *itemPtr = (Slot *)&item;
-    return vmSetMapNodeData(&umka->vm, (Map *)map, *keyPtr, *itemPtr);
+    return umka && vmSetMapNodeData(&umka->vm, (Map *)map, *keyPtr, *itemPtr, umka->types.predecl.anyType);
 }
 
 

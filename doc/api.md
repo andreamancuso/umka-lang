@@ -1037,8 +1037,9 @@ Returned value: `true` if the map has been created, otherwise `false`.
 Notes:
 
 * The allocated map nodes, keys, and items are owned by the Umka interpreter heap and must not be accessed after `umkaFree` or after the interpreter has terminated with a runtime error
-* This host API slice supports map key and item types that are fixed-layout non-reference values, plus direct `str`. Fixed-layout non-reference values include ordinal and real types, fixed arrays, and structures that contain no pointers, weak pointers, strings, maps, dynamic arrays, interfaces, closures, or fibers
-* Unsupported map shapes include nested maps, dynamic arrays, pointers, weak pointers, interfaces, closures, fibers, `any`, and structures or arrays that contain any of those
+* This host API supports map key and item types that are fixed-layout non-reference values, plus direct `str`. Fixed-layout non-reference values include ordinal and real types, fixed arrays, and structures that contain no pointers, weak pointers, strings, maps, dynamic arrays, interfaces, closures, or fibers
+* This host API also supports `map[str]any` construction. Use `umkaMakeAny` to initialize an `UmkaAny`, pass a pointer to it in `item.ptrVal` to `umkaSetMapItem`, then release the temporary `UmkaAny` with `umkaReleaseHostValue` if it is not consumed elsewhere
+* Unsupported map construction shapes include nested maps as direct items, dynamic arrays as direct items, pointers, weak pointers, non-`any` interfaces, direct closure items, direct fiber items, arbitrary reference-bearing map keys, and structures or arrays that contain unsupported references. Supported structures, dynamic arrays, maps, and closures may still be boxed into `any` and inserted into `map[str]any`
 * `false` is returned for `NULL` arguments, non-map `type`, unsupported key/item types, or invalid non-zero `map` storage
 
 ```
@@ -1060,8 +1061,9 @@ Notes:
 * Direct `str` keys and items must be `NULL` or Umka strings created by `umkaMakeStr`
 * The map stores its own references to direct `str` keys and items. The caller remains responsible for any reference it keeps, and may call `umkaDecRef` after successful insertion to transfer sole ownership to the map
 * Replacing a direct `str` item decrements the old stored string reference
+* For `map[str]any`, `item.ptrVal` must point to an `UmkaAny` initialized by `umkaMakeAny`. The map stores its own references to the boxed concrete value. The caller remains responsible for releasing the temporary `UmkaAny` value it passed in
 * Fixed-layout non-reference keys and items are copied by value
-* `false` is returned for `NULL` arguments, uninitialized maps, unsupported map shapes, or direct string pointers that do not belong to the Umka heap. Allocation failures and other VM runtime errors still use the normal Umka error mechanism
+* `false` is returned for `NULL` arguments, uninitialized maps, unsupported map shapes, unsupported `any` payloads, or direct string pointers that do not belong to the Umka heap. Allocation failures and other VM runtime errors still use the normal Umka error mechanism
 
 ```
 UMKA_API bool umkaAssignHostValue(Umka *umka, void *dest, const UmkaType *type, UmkaStackSlot value);
@@ -1081,7 +1083,7 @@ Notes:
 
 * The assignment increments references held by the new value, decrements references held by the old destination value, then copies the new value bytes
 * Supported types are ordinal and real values, `bool`, `char`, direct `str`, `fn`, closures with supported captured upvalues, dynamic arrays, maps, fixed arrays, structures, and direct `any` or interface values whose concrete self value is supported
-* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items
+* Fixed arrays and structures may contain ordinal, real, `str`, dynamic array, map, fixed array, and structure fields/items. Pointers, weak pointers, interfaces, closures, fibers, and function values are rejected as directly assigned fields/items. `map[str]any` values are accepted when every inserted `any` payload is supported by `umkaMakeAny`
 * Dynamic values whose concrete self is an ordinal, real, `str`, dynamic array, map, fixed array, structure, `fn`, or supported closure are accepted. Pointer, weak pointer, nested interface, and fiber concrete values are rejected
 * Direct `str` values must be `NULL` or Umka strings created by `umkaMakeStr`
 * If `dest` is a parameter slot in an `UmkaFuncContext`, a successful `umkaCall` consumes that assigned parameter reference through normal function cleanup. Do not call `umkaReleaseHostValue` on that same parameter slot after the call returns. For host-owned storage that is not consumed by an Umka call, release it explicitly
@@ -1339,7 +1341,7 @@ Notes:
 * `umkaGetHostMapEntryAnyValue` is intended for built-in `any` map item values. Other value kinds return `false`
 * `umkaRetainHostMapEntryKey` and `umkaRetainHostMapEntryValue` use the same support and ownership rules as `umkaRetainHostValue`
 * String pointers and structured pointers returned through snapshot slots are borrowed from retained map storage. Retain the entry key or value in a separate host handle if it must outlive the map handle
-* Unsupported cases include map mutation through these APIs, host-created arbitrary `map[str]any` construction, arbitrary reference-bearing map keys, fiber payload retention, and borrowed map entry pointers
+* Unsupported cases include map mutation through these APIs, arbitrary reference-bearing map keys, fiber payload retention, unsupported `any` payloads, and borrowed map entry pointers
 
 ## Accessing Umka API dynamically
 

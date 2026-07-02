@@ -1549,8 +1549,13 @@ static bool doHostAssignableTypeSupported(const Type *type)
 
     switch (type->kind)
     {
-        case TYPE_DYNARRAY:
         case TYPE_MAP:
+            return doHostHandleContainedTypeSupported(type, 32) ||
+                   (typeMapKey(type)->kind == TYPE_STR &&
+                    typeMapItem(type)->kind == TYPE_INTERFACE &&
+                    typeMapItem(type)->numItems == 2);
+
+        case TYPE_DYNARRAY:
         case TYPE_ARRAY:
         case TYPE_STRUCT:
             return doHostHandleContainedTypeSupported(type, 32);
@@ -1622,7 +1627,8 @@ static bool doHostAssignableValueSupported(HeapPages *pages, const Type *type, S
         if (type->kind == TYPE_MAP)
         {
             const Map *map = (const Map *)value.ptrVal;
-            return map->type && typeEquivalent(map->type, type);
+            return map->type && typeEquivalent(map->type, type) &&
+                   doHostHandleRetainValueSupported(type, value, 32, pages->error);
         }
     }
 
@@ -1758,17 +1764,48 @@ static FORCE_INLINE bool doHostMapSlotTypeSupported(const Type *type)
 }
 
 
-static FORCE_INLINE bool doHostMapTypeSupported(const Type *type)
+static FORCE_INLINE bool doHostMapAnyTypeSupported(const Type *type, const Type *anyType)
 {
-    return type && type->kind == TYPE_MAP &&
-           doHostMapSlotTypeSupported(typeMapKey(type)) &&
-           doHostMapSlotTypeSupported(typeMapItem(type));
+    return type && anyType && type == anyType;
 }
 
 
-static FORCE_INLINE bool doHostMapStringSlotValid(HeapPages *pages, const Type *type, Slot slot)
+static FORCE_INLINE bool doHostMapKeyTypeSupported(const Type *type)
 {
-    return type->kind != TYPE_STR || !slot.ptrVal || pageFind(pages, slot.ptrVal);
+    return doHostMapSlotTypeSupported(type);
+}
+
+
+static FORCE_INLINE bool doHostMapItemTypeSupported(const Type *type, const Type *anyType)
+{
+    return doHostMapSlotTypeSupported(type) ||
+           doHostMapAnyTypeSupported(type, anyType);
+}
+
+
+static FORCE_INLINE bool doHostMapTypeSupported(const Type *type, const Type *anyType)
+{
+    return type && type->kind == TYPE_MAP &&
+           doHostMapKeyTypeSupported(typeMapKey(type)) &&
+           doHostMapItemTypeSupported(typeMapItem(type), anyType);
+}
+
+
+static FORCE_INLINE bool doHostMapSlotValueSupported(HeapPages *pages, const Type *type, Slot slot, const Type *anyType)
+{
+    if (!type)
+        return false;
+
+    if (type->kind == TYPE_STR)
+        return !slot.ptrVal || pageFind(pages, slot.ptrVal);
+
+    if (doHostMapAnyTypeSupported(type, anyType))
+        return doHostAssignableValueSupported(pages, type, slot);
+
+    if (type->kind == TYPE_ARRAY || type->kind == TYPE_STRUCT)
+        return slot.ptrVal;
+
+    return true;
 }
 
 
@@ -4838,9 +4875,9 @@ void *vmGetMapNodeData(VM *vm, Map *map, Slot key)
 }
 
 
-bool vmMakeMap(VM *vm, Map *map, const Type *type)
+bool vmMakeMap(VM *vm, Map *map, const Type *type, const Type *anyType)
 {
-    if (!vm || !map || !doHostMapTypeSupported(type))
+    if (!vm || !map || !doHostMapTypeSupported(type, anyType))
         return false;
 
     if (map->root || map->type)
@@ -4858,16 +4895,16 @@ bool vmMakeMap(VM *vm, Map *map, const Type *type)
 }
 
 
-bool vmSetMapNodeData(VM *vm, Map *map, Slot key, Slot data)
+bool vmSetMapNodeData(VM *vm, Map *map, Slot key, Slot data, const Type *anyType)
 {
-    if (!vm || !map || !map->root || !doHostMapTypeSupported(map->type))
+    if (!vm || !map || !map->root || !doHostMapTypeSupported(map->type, anyType))
         return false;
 
     const Type *keyType = typeMapKey(map->type);
     const Type *itemType = typeMapItem(map->type);
 
-    if (!doHostMapStringSlotValid(&vm->pages, keyType, key) ||
-        !doHostMapStringSlotValid(&vm->pages, itemType, data))
+    if (!doHostMapSlotValueSupported(&vm->pages, keyType, key, anyType) ||
+        !doHostMapSlotValueSupported(&vm->pages, itemType, data, anyType))
         return false;
 
     MapNode *node = *doGetMapNode(map, key, true, &vm->pages, vm->error);
