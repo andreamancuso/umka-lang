@@ -851,6 +851,105 @@ UMKA_API int umkaGetFuncDefaultParamCount(const UmkaType *type)
 }
 
 
+static bool apiSetDefaultParamValue(Umka *umka, UmkaStackSlot *slot, const Type *type, Const value)
+{
+    if (!umka || !slot || !type)
+        return false;
+
+    switch (type->kind)
+    {
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT:
+        case TYPE_BOOL:
+        case TYPE_CHAR:
+            slot->intVal = value.intVal;
+            return true;
+
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT:
+            slot->uintVal = value.uintVal;
+            return true;
+
+        case TYPE_REAL32:
+            slot->real32Val = (float)value.realVal;
+            return true;
+
+        case TYPE_REAL:
+            slot->realVal = value.realVal;
+            return true;
+
+        case TYPE_PTR:
+            slot->ptrVal = value.ptrVal;
+            return true;
+
+        case TYPE_STR:
+            slot->ptrVal = value.ptrVal ? umkaMakeStr(umka, (const char *)value.ptrVal) : NULL;
+            return !value.ptrVal || slot->ptrVal != NULL;
+
+        default:
+            return false;
+    }
+}
+
+
+UMKA_API bool umkaSetDefaultParam(Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int index)
+{
+    if (!umka || !type || !fn || !fn->params)
+        return false;
+
+    const Signature *sig = apiGetFuncSignature(type);
+    if (!sig)
+        return false;
+
+    const int paramCount = apiGetFuncParamCount(sig);
+    const int defaultCount = umkaGetFuncDefaultParamCount(type);
+    const int defaultStart = paramCount - defaultCount;
+
+    if (index < defaultStart || index >= paramCount)
+        return false;
+
+    const int internalIndex = index + apiGetFuncParamStart(sig);
+    const Param *param = sig->param[internalIndex];
+    if (!param || !param->type)
+        return false;
+
+    const UmkaType *contextParamType = umkaGetParamType(fn->params, index);
+    if (!contextParamType || !typeEquivalent(contextParamType, param->type))
+        return false;
+
+    UmkaStackSlot *slot = umkaGetParam(fn->params, index);
+    return apiSetDefaultParamValue(umka, slot, param->type, param->defaultVal);
+}
+
+
+UMKA_API bool umkaSetDefaultParams(Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int providedCount)
+{
+    if (!umka || !type || !fn || !fn->params)
+        return false;
+
+    const Signature *sig = apiGetFuncSignature(type);
+    if (!sig)
+        return false;
+
+    const int paramCount = apiGetFuncParamCount(sig);
+    const int defaultCount = umkaGetFuncDefaultParamCount(type);
+    const int requiredCount = paramCount - defaultCount;
+
+    if (providedCount < requiredCount || providedCount > paramCount)
+        return false;
+
+    for (int i = providedCount; i < paramCount; i++)
+        if (!umkaSetDefaultParam(umka, type, fn, i))
+            return false;
+
+    return true;
+}
+
+
 UMKA_API const UmkaType *umkaGetCallableFuncType(const UmkaType *type)
 {
     return apiGetCallableFuncType(type);

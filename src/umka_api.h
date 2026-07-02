@@ -238,6 +238,8 @@ typedef bool (*UmkaTypeUsesIndirectValueSlot)   (const UmkaType *type);
 typedef int (*UmkaGetEnumMemberCount)           (const UmkaType *type);
 typedef bool (*UmkaGetEnumMember)               (const UmkaType *type, int index, const char **name, int64_t *signedValue, uint64_t *unsignedValue);
 typedef int (*UmkaGetFuncDefaultParamCount)     (const UmkaType *type);
+typedef bool (*UmkaSetDefaultParam)             (Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int index);
+typedef bool (*UmkaSetDefaultParams)            (Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int providedCount);
 typedef const UmkaType *(*UmkaGetCallableFuncType)(const UmkaType *type);
 typedef bool (*UmkaTypeIsVariadicParamList)     (const UmkaType *type);
 typedef bool (*UmkaGetAnySelf)                  (const UmkaAny *value, const UmkaType **selfType, void **self);
@@ -341,6 +343,8 @@ typedef struct
     UmkaGetFuncDefaultParamCount umkaGetFuncDefaultParamCount;
     UmkaGetCallableFuncType umkaGetCallableFuncType;
     UmkaTypeIsVariadicParamList umkaTypeIsVariadicParamList;
+    UmkaSetDefaultParam umkaSetDefaultParam;
+    UmkaSetDefaultParams umkaSetDefaultParams;
 } UmkaAPI;
 
 
@@ -403,6 +407,8 @@ UMKA_API bool umkaTypeUsesIndirectValueSlot (const UmkaType *type);
 UMKA_API int  umkaGetEnumMemberCount        (const UmkaType *type);
 UMKA_API bool umkaGetEnumMember             (const UmkaType *type, int index, const char **name, int64_t *signedValue, uint64_t *unsignedValue);
 UMKA_API int  umkaGetFuncDefaultParamCount  (const UmkaType *type);
+UMKA_API bool umkaSetDefaultParam           (Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int index);
+UMKA_API bool umkaSetDefaultParams          (Umka *umka, const UmkaType *type, UmkaFuncContext *fn, int providedCount);
 UMKA_API const UmkaType *umkaGetCallableFuncType(const UmkaType *type);
 UMKA_API bool umkaTypeIsVariadicParamList   (const UmkaType *type);
 UMKA_API bool umkaGetAnySelf                (const UmkaAny *value, const UmkaType **selfType, void **self);

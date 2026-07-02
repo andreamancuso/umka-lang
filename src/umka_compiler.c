@@ -95,6 +95,8 @@ static void compilerSetAPI(Umka *umka)
     umka->api.umkaGetEnumMemberCount = umkaGetEnumMemberCount;
     umka->api.umkaGetEnumMember     = umkaGetEnumMember;
     umka->api.umkaGetFuncDefaultParamCount = umkaGetFuncDefaultParamCount;
+    umka->api.umkaSetDefaultParam   = umkaSetDefaultParam;
+    umka->api.umkaSetDefaultParams  = umkaSetDefaultParams;
     umka->api.umkaGetCallableFuncType = umkaGetCallableFuncType;
     umka->api.umkaTypeIsVariadicParamList = umkaTypeIsVariadicParamList;
 }

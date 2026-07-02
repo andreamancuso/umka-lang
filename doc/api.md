@@ -220,6 +220,35 @@ Parameters:
 Returned value: 0 if the Umka function returns successfully and no run-time errors are detected, otherwise the error code.
 
 ```
+UMKA_API bool umkaSetDefaultParam(Umka *umka, const UmkaType *type,
+                                  UmkaFuncContext *fn, int index);
+UMKA_API bool umkaSetDefaultParams(Umka *umka, const UmkaType *type,
+                                   UmkaFuncContext *fn, int providedCount);
+```
+Fills default parameter values into an existing function context before calling `umkaCall` or `umkaCallCallable`.
+
+Parameters:
+
+* `umka`: Interpreter instance handle
+* `type`: Function or closure type whose signature contains the defaults
+* `fn`: Function context whose source-level parameter slots will be written
+* `index`: Zero-based source parameter index to fill from its default value
+* `providedCount`: Number of leading source parameters already supplied by the host; trailing omitted defaults are filled
+
+Returned value: `true` if the requested default value or values were written, otherwise `false`.
+
+Notes:
+
+* Hidden closure/upvalue, receiver, and structured-result slots are handled internally. `index` and `providedCount` use source-level parameter positions
+* `umkaSetDefaultParam` returns `false` for a required parameter or an out-of-range index
+* `umkaSetDefaultParams` returns `false` if `providedCount` is smaller than the required parameter count or larger than the source parameter count
+* The context parameter type must match the reflected function parameter type
+* Supported default values are signed integers, unsigned integers, `bool`, `char`, `real32`, `real`, pointers, and `str`
+* String defaults are copied into Umka-owned string storage
+* Defaults for dynamic arrays, maps, interfaces, closures, fibers, `any`, weak pointers, and aggregate values are rejected
+* Raw default-value storage remains private; callers should not depend on `Const`, `Param`, `Signature`, or other internal layouts
+
+```
 UMKA_API bool umkaCallableValid(const UmkaType *type, UmkaStackSlot value);
 ```
 Checks whether a typed value is an initialized host-callable Umka `fn` or closure value.

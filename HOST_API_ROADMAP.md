@@ -34,7 +34,7 @@ Fourth fork slice status: `UmkaTypeKind`, `umkaGetTypeKind`, `umkaGetTypeName`, 
 
 The type/reflection API now covers the private `Type` facts UmkaSharp was reading directly for kind, spelling, size, item count, reference-containing detection, field metadata, enum members, map key/item types, callable signatures, default parameter count, callable closure unwrapping, variadic parameter-list detection, and direct-slot versus indirect-slot storage. The follow-up UmkaSharp slice should replace broad `Type` layout reads in `native/umka_shim.c` with these public APIs.
 
-Raw function default-value storage remains private because it is represented as internal `Const` data, including pointers to compiler-owned storage for heap-backed defaults. Hosts can query the number of default parameters. If UmkaSharp needs to fill omitted defaults without private signature access, add a dedicated public runtime helper that applies defaults to an `UmkaFuncContext` rather than exposing raw `Const` layout.
+Raw function default-value storage remains private because it is represented as internal `Const` data, including pointers to compiler-owned storage for heap-backed defaults. Hosts can query the number of default parameters and can fill supported omitted defaults through `umkaSetDefaultParam` or `umkaSetDefaultParams` without reading private `Signature`, `Param`, or `Const` layout.
 
 `UmkaHostHandle` can retain empty dynamic values and supported non-empty `any` or interface values by copying the full interface cell plus the concrete self value into handle-owned storage. Non-empty interface method-table fields are preserved. Supported retained concrete payloads are ordinal and real values, `str`, dynamic arrays, maps, fixed arrays, structures whose contained fields/items are also supported, direct function values, and closures whose captured upvalue cell is supported.
 
@@ -47,6 +47,10 @@ Current construction limits: direct host pointer ownership, weak pointers, fiber
 Sixth fork slice status: `umkaCallableValid`, `umkaMakeCallableContext`, and `umkaCallCallable` provide additive host-side exposure for typed `fn` and closure values. Hosts can validate a callable, create a VM-backed call context, fill source-level arguments through `umkaGetParam`, and invoke it while the API refreshes and reference-counts the hidden closure upvalue parameter. Retained closures and closures deconstructed from `any` can be called through the same path. Runtime errors and interruption use the existing `umkaCall` result model and terminate the interpreter through the normal VM path.
 
 Current callable limits: callable contexts borrow the callable value and do not by themselves retain it. Retain a closure with `UmkaHostHandle` if it must outlive the callback, stack frame, or dynamic value from which it was obtained. Fibers remain rejected by the callable API because a fiber is a heap VM context with its own stack and scheduler parent; `resume` switches the active VM fiber rather than performing an ordinary function call. Cross-thread invocation and cross-interpreter callable transfer remain out of scope.
+
+Seventh fork slice status: `umkaSetDefaultParam` and `umkaSetDefaultParams` provide additive host-side default-parameter materialization for existing `UmkaFuncContext` values. They use source-level parameter indices/counts, preserve hidden VM parameter conventions internally, validate the reflected function parameter type against the context slot type, and support the scalar, pointer, and `str` defaults needed by UmkaSharp. Unsupported defaults currently return `false` for dynamic arrays, maps, interfaces, closures, fibers, `any`, weak pointers, and aggregate values rather than exposing or copying private default storage.
+
+Once UmkaSharp consumes this slice, `native/umka_shim.c` should no longer need to read `fnType->sig->param[...]` or `Param.defaultVal` directly.
 
 ## 5. UmkaSharp Integration
 
